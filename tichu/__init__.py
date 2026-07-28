@@ -9,6 +9,7 @@ from .actions import (
 )
 from .cards import CARD_BY_ID, DECK, Card, Rank, Special, Suit
 from .combinations import Combination, CombinationKind, generate_combinations
+from .config import TichuRoundConfig
 from .round import Phase, TichuRound, partner_of, team_of
 from .match import TichuMatch
 
@@ -31,6 +32,7 @@ __all__ = [
     "Suit",
     "TichuMatch",
     "TichuRound",
+    "TichuRoundConfig",
     "generate_combinations",
     "partner_of",
     "team_of",

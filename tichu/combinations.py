@@ -69,7 +69,7 @@ class Combination:
         return any(card.special is special for card in self.cards)
 
     def contains_normal_rank(self, rank: int) -> bool:
-        return any(card.is_normal and card.rank == rank for card in self.cards)
+        return any(card.is_normal and card.normal_rank == rank for card in self.cards)
 
     def beats(self, other: Combination) -> bool:
         if self.is_dog or other.is_dog:
@@ -107,7 +107,7 @@ def _combo(
     )
 
 
-def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
+def classify_all(cards: tuple[Card, ...], *, allow_bombs: bool = True) -> tuple[Combination, ...]:
     """Return every legal interpretation of exactly ``cards``.
 
     Multiple interpretations matter when the Phoenix can fill different ranks,
@@ -144,19 +144,19 @@ def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
         elif card.special is Special.DRAGON:
             results.add(_combo(cards, CombinationKind.SINGLE, 15))
         else:
-            results.add(_combo(cards, CombinationKind.SINGLE, float(card.rank)))
+            results.add(_combo(cards, CombinationKind.SINGLE, float(card.normal_rank)))
         return tuple(sorted(results, key=Combination.sort_key))
 
     # Pairs and triples use only normal cards, with the Phoenix substituting for
     # one normal card of the same rank.
     if not other_specials:
-        normal_counts = Counter(card.rank for card in normals)
+        normal_counts = Counter(card.normal_rank for card in normals)
         if n == 2:
             if phoenix is None and len(normal_counts) == 1:
                 rank = next(iter(normal_counts))
                 results.add(_combo(cards, CombinationKind.PAIR, float(rank)))
             elif phoenix is not None and len(normals) == 1:
-                rank = normals[0].rank
+                rank = normals[0].normal_rank
                 results.add(_combo(cards, CombinationKind.PAIR, float(rank), rank))
 
         if n == 3:
@@ -168,7 +168,7 @@ def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
                 results.add(_combo(cards, CombinationKind.TRIPLE, float(rank), rank))
 
         # Four equal normal cards are a bomb.
-        if n == 4 and phoenix is None and list(normal_counts.values()) == [4]:
+        if allow_bombs and n == 4 and phoenix is None and list(normal_counts.values()) == [4]:
             rank = next(iter(normal_counts))
             results.add(_combo(cards, CombinationKind.FOUR_BOMB, float(rank)))
 
@@ -242,7 +242,7 @@ def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
         duplicate = False
         for card in cards:
             if card.is_normal:
-                rank = int(card.rank)
+                rank = card.normal_rank
             elif card.special is Special.MAHJONG:
                 rank = 1
             else:
@@ -257,10 +257,10 @@ def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
             if phoenix is None:
                 ordered = sorted(explicit)
                 if len(ordered) == n and ordered == list(range(ordered[0], ordered[0] + n)):
-                    same_suit = len(normals) == n and len({card.suit for card in normals}) == 1
+                    same_suit = len(normals) == n and len({card.normal_suit for card in normals}) == 1
                     kind = (
                         CombinationKind.STRAIGHT_FLUSH_BOMB
-                        if same_suit
+                        if allow_bombs and same_suit
                         else CombinationKind.STRAIGHT
                     )
                     results.add(_combo(cards, kind, float(ordered[-1])))
@@ -287,7 +287,10 @@ def classify_all(cards: tuple[Card, ...]) -> tuple[Combination, ...]:
 
 
 @lru_cache(maxsize=8192)
-def generate_combinations(hand_ids: tuple[int, ...]) -> tuple[Combination, ...]:
+def generate_combinations(
+    hand_ids: tuple[int, ...],
+    allow_bombs: bool = True,
+) -> tuple[Combination, ...]:
     """Generate all legal combinations contained in a hand.
 
     A 14-card hand has only 16,383 non-empty subsets. Exhaustive subset
@@ -301,7 +304,7 @@ def generate_combinations(hand_ids: tuple[int, ...]) -> tuple[Combination, ...]:
     results: set[Combination] = set()
     for size in range(1, len(cards) + 1):
         for subset in choose(cards, size):
-            results.update(classify_all(subset))
+            results.update(classify_all(subset, allow_bombs=allow_bombs))
     return tuple(sorted(results, key=Combination.sort_key))
 
 

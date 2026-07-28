@@ -21,6 +21,7 @@ from .actions import (
     combination_to_dict,
 )
 from .cards import CARD_BY_ID, DECK, Special
+from .config import TichuRoundConfig
 from .combinations import (
     Combination,
     CombinationKind,
@@ -51,6 +52,45 @@ def partner_of(player: int) -> int:
     return (player + 2) % 4
 
 
+def _deck_for_config(config: TichuRoundConfig) -> list[int]:
+    return [
+        card.card_id
+        for card in DECK
+        if config.special_cards or card.special is None
+    ]
+
+
+def _deal_to_players(
+    deck: list[int],
+    hands: dict[int, list[int]],
+    dealer: int,
+    *,
+    count: int | None = None,
+) -> None:
+    cursor = dealer
+    dealt = 0
+    while deck and (count is None or dealt < count):
+        hands[cursor].append(deck.pop(0))
+        cursor = (cursor + 1) % 4
+        dealt += 1
+    if count is not None and dealt != count:
+        raise AssertionError("The configured deck is too small for the initial deal")
+    for hand in hands.values():
+        hand.sort()
+
+
+def _opening_player(hands: dict[int, list[int]], dealer: int) -> int:
+    mahjong_holder = next(
+        (
+            player
+            for player in range(4)
+            if any(CARD_BY_ID[card_id].special is Special.MAHJONG for card_id in hands[player])
+        ),
+        None,
+    )
+    return dealer if mahjong_holder is None else mahjong_holder
+
+
 @dataclass
 class TichuRound:
     seed: int
@@ -59,6 +99,7 @@ class TichuRound:
     deck_remaining: list[int]
     phase: Phase = Phase.GRAND_TICHU
     current_player: int | None = 0
+    config: TichuRoundConfig = field(default_factory=TichuRoundConfig)
 
     captured: dict[int, list[int]] = field(
         default_factory=lambda: {player: [] for player in range(4)}
@@ -87,37 +128,50 @@ class TichuRound:
     public_history: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def new(cls, seed: int = 0, dealer: int = 0) -> "TichuRound":
+    def new(
+        cls,
+        seed: int = 0,
+        dealer: int = 0,
+        config: TichuRoundConfig | None = None,
+    ) -> "TichuRound":
+        config = TichuRoundConfig() if config is None else config
         if dealer not in range(4):
             raise ValueError("dealer must be 0, 1, 2, or 3")
         rng = random.Random(seed)
-        deck = [card.card_id for card in DECK]
+        deck = _deck_for_config(config)
         rng.shuffle(deck)
         hands = {player: [] for player in range(4)}
 
-        # The first 8 cards per player are taken one at a time. Grand Tichu is
-        # decided before the ninth card is received.
-        cursor = dealer
-        for _ in range(32):
-            hands[cursor].append(deck.pop(0))
-            cursor = (cursor + 1) % 4
-        for hand in hands.values():
-            hand.sort()
+        if config.grand_tichu:
+            # The first 8 cards per player are taken one at a time. Grand Tichu
+            # is decided before the ninth card is received.
+            _deal_to_players(deck, hands, dealer, count=32)
+        else:
+            _deal_to_players(deck, hands, dealer)
 
         round_ = cls(
             seed=seed,
             dealer=dealer,
             hands=hands,
             deck_remaining=deck,
-            phase=Phase.GRAND_TICHU,
+            config=config,
+            phase=Phase.GRAND_TICHU if config.grand_tichu else Phase.PLAY,
             current_player=dealer,
         )
+        if not config.grand_tichu:
+            round_._start_after_deal()
         round_.assert_valid()
         return round_
 
     @classmethod
-    def replay(cls, seed: int, actions: Iterable[dict[str, Any]], dealer: int = 0) -> "TichuRound":
-        round_ = cls.new(seed=seed, dealer=dealer)
+    def replay(
+        cls,
+        seed: int,
+        actions: Iterable[dict[str, Any]],
+        dealer: int = 0,
+        config: TichuRoundConfig | None = None,
+    ) -> "TichuRound":
+        round_ = cls.new(seed=seed, dealer=dealer, config=config)
         for index, raw_action in enumerate(actions):
             try:
                 round_.apply(action_from_dict(raw_action["action"] if "action" in raw_action else raw_action))
@@ -135,9 +189,13 @@ class TichuRound:
         player = self.current_player
 
         if self.phase is Phase.GRAND_TICHU:
+            if not self.config.grand_tichu:
+                return ()
             return (GrandTichuDecision(False), GrandTichuDecision(True))
 
         if self.phase is Phase.EXCHANGE:
+            if not self.config.card_exchange:
+                return ()
             recipients = tuple(other for other in range(4) if other != player)
             actions = []
             for selected in permutations(self.hands[player], 3):
@@ -156,6 +214,8 @@ class TichuRound:
             )
 
         if self.phase is Phase.BOMB_WINDOW:
+            if not self.config.bombs:
+                return ()
             bombs = self._legal_bombs(player)
             return (BombAction(None),) + tuple(BombAction(combo) for combo in bombs)
 
@@ -164,13 +224,14 @@ class TichuRound:
 
         actions: list[Action] = []
         if (
-            not self.has_played_card[player]
+            self.config.small_tichu
+            and not self.has_played_card[player]
             and player not in self.tichu_calls
         ):
             actions.append(DeclareSmallTichu())
 
         candidate_plays: list[PlayAction] = []
-        for raw_combo in generate_combinations(tuple(self.hands[player])):
+        for raw_combo in self._combinations_in_hand(player):
             if raw_combo.is_dog:
                 if self.top_combination is None:
                     candidate_plays.append(PlayAction(raw_combo))
@@ -186,12 +247,13 @@ class TichuRound:
 
             if combo.contains_special(Special.MAHJONG):
                 candidate_plays.append(PlayAction(combo, None))
-                candidate_plays.extend(PlayAction(combo, rank) for rank in range(2, 15))
+                if self.config.wishes:
+                    candidate_plays.extend(PlayAction(combo, rank) for rank in range(2, 15))
             else:
                 candidate_plays.append(PlayAction(combo))
 
         forced = []
-        if self.wish_rank is not None:
+        if self.config.wishes and self.wish_rank is not None:
             forced = [
                 action
                 for action in candidate_plays
@@ -251,16 +313,20 @@ class TichuRound:
             self.current_player = next_player
             return
 
-        # Deal the remaining six cards per player, one at a time.
-        cursor = self.dealer
-        while self.deck_remaining:
-            self.hands[cursor].append(self.deck_remaining.pop(0))
-            cursor = (cursor + 1) % 4
-        for hand in self.hands.values():
-            hand.sort()
+        # Deal the remaining cards one at a time.
+        _deal_to_players(self.deck_remaining, self.hands, self.dealer)
+        self._start_after_deal()
 
-        self.phase = Phase.EXCHANGE
-        self.current_player = self.dealer
+    def _start_after_deal(self) -> None:
+        if self.config.card_exchange:
+            self.phase = Phase.EXCHANGE
+            self.current_player = self.dealer
+            return
+        self._start_play()
+
+    def _start_play(self) -> None:
+        self.phase = Phase.PLAY
+        self.current_player = _opening_player(self.hands, self.dealer)
 
     def _apply_exchange(self, player: int, action: ExchangeAction) -> None:
         self.pending_exchanges[player] = action
@@ -286,14 +352,8 @@ class TichuRound:
             self.hands[recipient].sort()
 
         self.pending_exchanges.clear()
-        mahjong_holder = next(
-            player_id
-            for player_id in range(4)
-            if any(CARD_BY_ID[card_id].special is Special.MAHJONG for card_id in self.hands[player_id])
-        )
-        self.phase = Phase.PLAY
-        self.current_player = mahjong_holder
         self.public_history.append({"type": "exchange_complete"})
+        self._start_play()
 
     def _apply_play(self, player: int, action: PlayAction) -> None:
         combo = action.combination
@@ -302,11 +362,11 @@ class TichuRound:
         self.has_played_card[player] = True
 
         old_wish = self.wish_rank
-        if old_wish is not None and combo.contains_normal_rank(old_wish):
+        if self.config.wishes and old_wish is not None and combo.contains_normal_rank(old_wish):
             self.wish_rank = None
             self.public_history.append({"type": "wish_fulfilled", "rank": old_wish, "player": player})
 
-        if combo.contains_special(Special.MAHJONG):
+        if self.config.wishes and combo.contains_special(Special.MAHJONG):
             self.wish_rank = action.wish_rank
             if action.wish_rank is not None:
                 self.public_history.append(
@@ -399,7 +459,7 @@ class TichuRound:
             }
         )
 
-        if self.wish_rank is not None and combo.contains_normal_rank(self.wish_rank):
+        if self.config.wishes and self.wish_rank is not None and combo.contains_normal_rank(self.wish_rank):
             old_wish = self.wish_rank
             self.wish_rank = None
             self.public_history.append({"type": "wish_fulfilled", "rank": old_wish, "player": player})
@@ -449,17 +509,19 @@ class TichuRound:
             self.current_player = resume_player
             return
 
+        self.bomb_resume_player = resume_player
+        self.bomb_close_behavior = close_behavior
+        if not self.config.bombs:
+            self._close_bomb_window()
+            return
+
         queue = self._active_cycle_after(anchor)
         if not any(self._legal_bombs(player) for player in queue):
-            self.bomb_resume_player = resume_player
-            self.bomb_close_behavior = close_behavior
             self._close_bomb_window()
             return
 
         self.phase = Phase.BOMB_WINDOW
         self.bomb_queue = queue
-        self.bomb_resume_player = resume_player
-        self.bomb_close_behavior = close_behavior
         self.current_player = queue[0]
 
     def _close_bomb_window(self) -> None:
@@ -574,12 +636,15 @@ class TichuRound:
         for player, value in self.tichu_calls.items():
             scores[team_of(player)] += value if player == winner else -value
 
+    def _combinations_in_hand(self, player: int) -> tuple[Combination, ...]:
+        return generate_combinations(tuple(self.hands[player]), self.config.bombs)
+
     def _legal_bombs(self, player: int) -> tuple[Combination, ...]:
-        if self.top_combination is None:
+        if not self.config.bombs or self.top_combination is None:
             return ()
         return tuple(
             combo
-            for combo in generate_combinations(tuple(self.hands[player]))
+            for combo in self._combinations_in_hand(player)
             if combo.is_bomb and combo.beats(self.top_combination)
         )
 
@@ -616,6 +681,7 @@ class TichuRound:
         if player not in range(4):
             raise ValueError("player must be 0, 1, 2, or 3")
         return {
+            "config": self.config.to_dict(),
             "phase": self.phase.value,
             "current_player": self.current_player,
             "player": player,
@@ -639,6 +705,7 @@ class TichuRound:
         return {
             "seed": self.seed,
             "dealer": self.dealer,
+            "config": self.config.to_dict(),
             "phase": self.phase.value,
             "current_player": self.current_player,
             "hands": {str(player): list(cards) for player, cards in self.hands.items()},
@@ -658,6 +725,7 @@ class TichuRound:
         payload = {
             "seed": self.seed,
             "dealer": self.dealer,
+            "config": self.config.to_dict(),
             "actions": self.action_log,
             "final_state": self.full_state(),
         }
@@ -679,15 +747,35 @@ class TichuRound:
         if len(zones) != len(set(zones)):
             duplicates = [card_id for card_id in set(zones) if zones.count(card_id) > 1]
             raise AssertionError(f"Cards appear in multiple zones: {duplicates}")
-        if set(zones) != {card.card_id for card in DECK}:
-            missing = {card.card_id for card in DECK} - set(zones)
-            extra = set(zones) - {card.card_id for card in DECK}
+        expected_cards = set(_deck_for_config(self.config))
+        if set(zones) != expected_cards:
+            missing = expected_cards - set(zones)
+            extra = set(zones) - expected_cards
             raise AssertionError(f"Card conservation failed; missing={missing}, extra={extra}")
 
         if self.current_player is not None and self.current_player not in range(4):
             raise AssertionError("Invalid current player")
+        if self.phase is Phase.GRAND_TICHU and not self.config.grand_tichu:
+            raise AssertionError("Grand Tichu phase is disabled")
+        if self.phase is Phase.EXCHANGE and not self.config.card_exchange:
+            raise AssertionError("Card exchange phase is disabled")
+        if self.phase is Phase.BOMB_WINDOW and not self.config.bombs:
+            raise AssertionError("Bomb window phase is disabled")
+        if self.phase is Phase.DRAGON_GIFT and not self.config.special_cards:
+            raise AssertionError("Dragon gift phase requires special cards")
         if self.wish_rank is not None and self.wish_rank not in range(2, 15):
             raise AssertionError("Invalid Mahjong wish")
+        if self.wish_rank is not None and not self.config.wishes:
+            raise AssertionError("Mahjong wishes are disabled")
+        for player, value in self.tichu_calls.items():
+            if player not in range(4):
+                raise AssertionError("Invalid Tichu caller")
+            if value == 100 and not self.config.small_tichu:
+                raise AssertionError("Small Tichu calls are disabled")
+            if value == 200 and not self.config.grand_tichu:
+                raise AssertionError("Grand Tichu calls are disabled")
+            if value not in (100, 200):
+                raise AssertionError("Invalid Tichu call value")
         if len(set(self.finish_order)) != len(self.finish_order):
             raise AssertionError("A player appears twice in finish order")
         for player in self.finish_order:

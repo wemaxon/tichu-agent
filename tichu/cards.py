@@ -61,11 +61,24 @@ class Card:
         return self.special is None
 
     @property
+    def normal_rank(self) -> int:
+        if self.rank is None:
+            raise ValueError("Special cards do not have a normal rank")
+        return self.rank
+
+    @property
+    def normal_suit(self) -> Suit:
+        if self.suit is None:
+            raise ValueError("Special cards do not have a suit")
+        return self.suit
+
+    @property
     def label(self) -> str:
         if self.special is not None:
             return self.special.value.upper()
         rank_labels = {11: "J", 12: "Q", 13: "K", 14: "A"}
-        return f"{rank_labels.get(self.rank, self.rank)}-{self.suit.value}"
+        rank = self.normal_rank
+        return f"{rank_labels.get(rank, rank)}-{self.normal_suit.value}"
 
     @property
     def points(self) -> int:
