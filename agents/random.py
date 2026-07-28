@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 
 from tichu.actions import (
+    Action,
     BombAction,
     DeclareSmallTichu,
     ExchangeAction,
@@ -28,7 +29,7 @@ class RandomAgent:
         self.call_small_probability = call_small_probability
         self.bomb_probability = bomb_probability
 
-    def choose_action(self, round_: TichuRound):
+    def choose_action(self, round_: TichuRound) -> Action:
         player = round_.current_player
         if player is None:
             raise RuntimeError("No action is available")

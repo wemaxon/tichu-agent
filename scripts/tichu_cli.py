@@ -2,21 +2,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from agents.random import RandomAgent
-from .config import TichuRoundConfig
-from .round import TichuRound
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from agents import Agent, available_agent_names, create_agent
+from tichu.config import TichuRoundConfig
+from tichu.round import TichuRound
 
 
 def play_round(
     seed: int,
     dealer: int,
+    agents: list[Agent],
+    *,
     verbose: bool = False,
     config: TichuRoundConfig | None = None,
 ) -> TichuRound:
+    if len(agents) != 4:
+        raise ValueError("Exactly four agents are required")
+
     round_ = TichuRound.new(seed=seed, dealer=dealer, config=config)
-    agents = [RandomAgent(seed * 17 + player, bomb_probability=0.15) for player in range(4)]
     steps = 0
     while not round_.terminal:
         player = round_.current_player
@@ -42,16 +50,36 @@ def _round_config_from_args(args: argparse.Namespace) -> TichuRoundConfig:
     )
 
 
+def _agent_names_from_args(args: argparse.Namespace) -> tuple[str, str, str, str]:
+    if args.agents is not None:
+        return tuple(args.agents)
+    return (args.agent, args.agent, args.agent, args.agent)
+
+
+def _build_agents(agent_names: tuple[str, str, str, str], seed: int) -> list[Agent]:
+    return [
+        create_agent(agent_name, seed * 17 + player)
+        for player, agent_name in enumerate(agent_names)
+    ]
+
+
 def command_play(args: argparse.Namespace) -> int:
     config = _round_config_from_args(args)
+    agent_names = _agent_names_from_args(args)
     aggregate = [0, 0]
     rounds: list[TichuRound] = []
+
+    if args.verbose:
+        print("Agents: " + " ".join(f"P{player}={name}" for player, name in enumerate(agent_names)))
+
     for offset in range(args.rounds):
+        round_seed = args.seed + offset
         round_ = play_round(
-            args.seed + offset,
+            round_seed,
             (args.dealer + offset) % 4,
-            args.verbose,
-            config,
+            _build_agents(agent_names, round_seed),
+            verbose=args.verbose,
+            config=config,
         )
         rounds.append(round_)
         assert round_.round_scores is not None
@@ -92,6 +120,12 @@ def command_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_agents(_: argparse.Namespace) -> int:
+    for name in available_agent_names():
+        print(name)
+    return 0
+
+
 def _add_round_config_args(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(
         grand_tichu=True,
@@ -110,21 +144,37 @@ def _add_round_config_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deterministic four-player Tichu simulator")
+    parser = argparse.ArgumentParser(description="Tichu simulation utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    play = subparsers.add_parser("play", help="Run random legal agents")
+    play = subparsers.add_parser("play", help="Run one or more simulated rounds")
     play.add_argument("--seed", type=int, default=0)
     play.add_argument("--dealer", type=int, choices=range(4), default=0)
     play.add_argument("--rounds", type=int, default=1)
     play.add_argument("--verbose", action="store_true")
     play.add_argument("--log", type=str)
+    play.add_argument(
+        "--agent",
+        choices=available_agent_names(),
+        default="random",
+        help="Agent used for all players unless --agents is provided",
+    )
+    play.add_argument(
+        "--agents",
+        choices=available_agent_names(),
+        nargs=4,
+        metavar=("P0", "P1", "P2", "P3"),
+        help="Agents for players 0, 1, 2, and 3",
+    )
     _add_round_config_args(play)
     play.set_defaults(func=command_play)
 
     replay = subparsers.add_parser("replay", help="Verify a saved replay")
     replay.add_argument("path")
     replay.set_defaults(func=command_replay)
+
+    agents = subparsers.add_parser("agents", help="List available agent names")
+    agents.set_defaults(func=command_agents)
     return parser
 
 
