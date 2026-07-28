@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+markers = [
+    "random: randomized complete-round invariant checks",
+    "rules: deterministic card and round rule checks",
+    "scoring: scoring and match progression checks",
+    "slow: tests that are intentionally expensive when configured with large inputs",
+]
