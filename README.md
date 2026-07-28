@@ -23,3 +23,11 @@ Select agents per player:
 ```bash
 python -m scripts.tichu_cli play --agents random random random random
 ```
+
+#### Play from the console
+```bash
+python -m scripts.tichu_cli console --seat 0 --agent random
+```
+
+This controls one human seat and assigns agents to the other three seats,
+including the human player's partner.

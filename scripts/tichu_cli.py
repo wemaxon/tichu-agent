@@ -9,6 +9,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents import Agent, available_agent_names, create_agent
+from scripts.tichu_console import command_console
 from tichu.config import TichuRoundConfig
 from tichu.round import TichuRound
 
@@ -168,6 +169,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_round_config_args(play)
     play.set_defaults(func=command_play)
+
+    console = subparsers.add_parser("console", help="Play one round from an interactive console")
+    console.add_argument("--seed", type=int, default=0)
+    console.add_argument("--dealer", type=int, choices=range(4), default=0)
+    console.add_argument("--seat", type=int, choices=range(4), default=0)
+    console.add_argument("--log", type=str)
+    console.add_argument(
+        "--agent",
+        choices=available_agent_names(),
+        default="random",
+        help="Agent used for every non-human player unless --agents is provided",
+    )
+    console.add_argument(
+        "--agents",
+        choices=available_agent_names(),
+        nargs=3,
+        metavar=("A0", "A1", "A2"),
+        help="Agents for the three non-human players in player order",
+    )
+    _add_round_config_args(console)
+    console.set_defaults(func=command_console)
 
     replay = subparsers.add_parser("replay", help="Verify a saved replay")
     replay.add_argument("path")
