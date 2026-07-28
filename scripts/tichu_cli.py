@@ -32,7 +32,7 @@ def play_round(
         action = agents[player].choose_action(round_)
         if verbose:
             print(f"{steps:04d} P{player} [{round_.phase.value}] {action}")
-        round_.apply(action)
+        round_ = round_.apply(action)
         steps += 1
         if steps > 20_000:
             raise RuntimeError("Round exceeded the safety step limit")
@@ -86,7 +86,7 @@ def command_play(args: argparse.Namespace) -> int:
         aggregate[0] += round_.round_scores[0]
         aggregate[1] += round_.round_scores[1]
         print(
-            f"Round {offset + 1}: finish={round_.finish_order} "
+            f"Round {offset + 1}: finish={list(round_.finish_order)} "
             f"score={round_.round_scores[0]}:{round_.round_scores[1]}"
         )
     print(f"Aggregate score: {aggregate[0]}:{aggregate[1]}")
@@ -107,7 +107,7 @@ def command_replay(args: argparse.Namespace) -> int:
         config=TichuRoundConfig.from_dict(payload.get("config")),
         actions=payload["actions"],
     )
-    print(f"Finish order: {round_.finish_order}")
+    print(f"Finish order: {list(round_.finish_order)}")
     print(f"Round score: {round_.round_scores}")
     expected = payload.get("final_state")
     if expected is not None:

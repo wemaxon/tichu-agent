@@ -10,7 +10,7 @@ Agents or humans can connect using the following API:
 player = round_.current_player
 observation = round_.observation(player)
 legal_actions = round_.legal_actions()
-round_.apply(selected_action)
+round_ = round_.apply(selected_action)
 ```
 
 #### Run a simulation with random agents

@@ -44,7 +44,7 @@ def play_checked_round(seed: int, config: TichuRoundConfig) -> TichuRound:
         assert legal_actions, f"No legal actions in phase {round_.phase}"
         action = agents[player].choose_action(round_)
         assert action in legal_actions, f"Agent chose illegal action: {action}"
-        round_.apply(action)
+        round_ = round_.apply(action)
         steps += 1
         assert steps <= 20_000, "Round exceeded the safety step limit"
 

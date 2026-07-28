@@ -26,10 +26,10 @@ def test_double_victory_scores_200_points() -> None:
         finish_order=[0],
     )
 
-    round_.apply(PlayAction(ace))
+    round_ = round_.apply(PlayAction(ace))
 
     assert round_.phase is Phase.ROUND_OVER
-    assert round_.finish_order[:2] == [0, 2]
+    assert round_.finish_order[:2] == (0, 2)
     assert round_.round_scores == (200, 0)
 
 
@@ -49,11 +49,11 @@ def test_final_remaining_players_cards_and_captured_tricks_are_assigned() -> Non
         captured={3: tailender_captured},
     )
 
-    round_.apply(PlayAction(last_play))
+    round_ = round_.apply(PlayAction(last_play))
 
     assert round_.phase is Phase.ROUND_OVER
-    assert round_.hands[3] == []
-    assert round_.captured[3] == []
+    assert round_.hands[3] == ()
+    assert round_.captured[3] == ()
     assert tailender_hand[0] in round_.captured[0]
     assert tailender_captured[0] in round_.captured[0]
     assert round_.round_scores == (15, 0)
@@ -71,7 +71,7 @@ def test_positive_and_negative_tichu_declarations_affect_scores() -> None:
         tichu_calls={0: 100, 1: 100, 2: 200, 3: 200},
     )
 
-    round_._finalize_double_victory()
+    round_ = round_._finalize_double_victory()
 
     assert round_.round_scores == (100, -300)
 
@@ -86,10 +86,10 @@ def test_both_teams_crossing_target_score_ends_match_with_higher_score_winning()
     )
     match = TichuMatch(target_score=1000, scores=[990, 995])
 
-    match.record_round(completed_round)
+    match = match.record_round(completed_round)
 
     assert match.terminal
-    assert match.scores == [1010, 1005]
+    assert match.scores == (1010, 1005)
     assert match.winning_team == 0
 
 
@@ -103,8 +103,8 @@ def test_stalemate_over_target_keeps_match_alive_until_tie_breaks() -> None:
     )
     match = TichuMatch(target_score=1000, scores=[990, 990])
 
-    match.record_round(completed_round)
+    match = match.record_round(completed_round)
 
-    assert match.scores == [1000, 1000]
+    assert match.scores == (1000, 1000)
     assert not match.terminal
     assert match.winning_team is None

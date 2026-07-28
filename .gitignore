@@ -1,4 +1,5 @@
 # Python
 .venv
+.pytest_cache
 *.pyc
 __pycache__

@@ -26,7 +26,7 @@ def test_mahjong_wish_forces_fulfillable_plays() -> None:
         current_player=0,
     )
 
-    round_.apply(PlayAction(mahjong, 5))
+    round_ = round_.apply(PlayAction(mahjong, 5))
 
     assert round_.wish_rank == 5
     assert round_.current_player == 1
@@ -86,7 +86,7 @@ def test_wish_is_fulfilled_through_a_combination() -> None:
         last_play_player=0,
     )
 
-    round_.apply(PlayAction(wished_pair))
+    round_ = round_.apply(PlayAction(wished_pair))
 
     assert round_.wish_rank is None
     assert {"type": "wish_fulfilled", "rank": 5, "player": 1} in round_.public_history
@@ -113,7 +113,7 @@ def test_wish_can_be_fulfilled_during_bomb_interruption() -> None:
         bomb_close_behavior=BombCloseBehavior.CONTINUE,
     )
 
-    round_.apply(BombAction(bomb))
+    round_ = round_.apply(BombAction(bomb))
 
     assert round_.wish_rank is None
     assert {"type": "wish_fulfilled", "rank": 5, "player": 1} in round_.public_history
@@ -131,7 +131,7 @@ def test_dog_transfers_lead_to_partner() -> None:
         current_player=0,
     )
 
-    round_.apply(PlayAction(dog))
+    round_ = round_.apply(PlayAction(dog))
 
     assert round_.current_player == 2
     assert 0 in round_.finish_order
@@ -150,7 +150,7 @@ def test_dog_skips_partner_who_has_already_gone_out() -> None:
         finish_order=[2],
     )
 
-    round_.apply(PlayAction(dog))
+    round_ = round_.apply(PlayAction(dog))
 
     assert round_.current_player == 3
 
@@ -168,9 +168,9 @@ def test_dragon_recipient_selection_and_capture() -> None:
     actions = round_.legal_actions()
     assert {action.recipient for action in actions} == {1, 3}
 
-    round_.apply(DragonGiftAction(1))
+    round_ = round_.apply(DragonGiftAction(1))
 
-    assert round_.captured[1][-2:] == trick_cards
+    assert round_.captured[1][-2:] == tuple(trick_cards)
     assert round_.pending_dragon_winner is None
     assert round_.phase is Phase.PLAY
 
@@ -188,11 +188,11 @@ def test_dragon_trick_can_be_bombed_before_recipient_selection() -> None:
         current_player=0,
     )
 
-    round_.apply(PlayAction(dragon))
+    round_ = round_.apply(PlayAction(dragon))
     assert round_.phase is Phase.BOMB_WINDOW
     assert round_.current_player == 1
 
-    round_.apply(BombAction(bomb))
+    round_ = round_.apply(BombAction(bomb))
 
     assert round_.phase is not Phase.DRAGON_GIFT
     assert round_.pending_dragon_winner is None
@@ -215,7 +215,7 @@ def test_player_can_go_out_by_playing_a_bomb() -> None:
         last_play_player=0,
     )
 
-    round_.apply(PlayAction(bomb))
+    round_ = round_.apply(PlayAction(bomb))
 
     assert 1 in round_.finish_order
 
@@ -247,7 +247,7 @@ def test_rule_config_removes_disabled_actions_and_phases() -> None:
     assert any(isinstance(action, PlayAction) and action.wish_rank is None for action in actions)
     assert not any(isinstance(action, PlayAction) and action.wish_rank for action in actions)
 
-    round_.apply(PlayAction(mahjong, None))
+    round_ = round_.apply(PlayAction(mahjong, None))
 
     assert round_.wish_rank is None
     assert round_.phase not in {Phase.GRAND_TICHU, Phase.EXCHANGE, Phase.BOMB_WINDOW}
