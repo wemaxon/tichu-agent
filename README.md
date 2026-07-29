@@ -2,8 +2,8 @@
 
 Repo to test different machine learning approaches at playing the card game Tichu.
 
-## Game Environment
-The basic [game environment](/tichu/) implements a standard four-player parnership tichu.
+## Game Engine
+The [game engine](/tichu/) implements a standard four-player parnership tichu.
 
 Agents or humans can connect using the following API:
 ```
@@ -33,10 +33,35 @@ python -m scripts.tichu_cli console --seat 0 --agent random
 This controls one human seat and assigns agents to the other three seats,
 including the human player's partner.
 
+## RL Environment
+
+`TichuEnv` exposes actor-relative policy observations and variable legal-action
+features without exposing the underlying round or opponents' hands:
+
+```python
+from ml import TichuEnv
+
+env = TichuEnv(seed=0)
+state = env.state()
+
+assert state.policy_observation.current_player == 0
+
+action_features = [candidate.features for candidate in state.encoded_actions]
+state = env.step(action_index=0)
+```
+
+Relative seats are ordered as the observer, next seat, partner, and previous
+seat. Action targets use the same coordinates:
+  - 0: self
+  - 1: next player
+  - 2: partner
+  - 3: previous player
+  
+Full engine state remains available explicitly as `env.round` for diagnostics, but it is not part of the
+policy-facing `TichuEnvState`.
+
 
 ## Agents
-
-Available agents:
 
 - `random`: random legal-action baseline.
 - `greedy`: deterministic baseline that declines Tichu calls, exchanges low cards,

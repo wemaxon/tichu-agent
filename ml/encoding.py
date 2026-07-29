@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TypeAlias, TypeVar
 
@@ -16,18 +16,27 @@ from tichu.actions import (
 )
 from tichu.cards import CARD_CLASS_NAMES
 from tichu.combinations import Combination, CombinationKind
-from tichu.observations import CombinationObservation, PhaseName, RoundObservation
+from tichu.observations import BombCloseBehaviorName, PhaseName, RoundObservation
+
+from .policy_view import (
+    PLAYER_COUNT,
+    POLICY_CONFIG_KEYS,
+    PolicyCombination,
+    PolicyExchangeCard,
+    PolicyObservation,
+    policy_view,
+    relative_player,
+)
 
 FeatureVector: TypeAlias = tuple[float, ...]
 T = TypeVar("T")
 
 CARD_COUNT = len(CARD_CLASS_NAMES)
-PLAYER_COUNT = 4
-TEAM_COUNT = 2
 MAX_HAND_SIZE = 14.0
 MAX_PLAY_RANK = 15.0
 MAX_NORMAL_RANK = 14.0
-SCORE_SCALE = 1000.0
+MAX_CONSECUTIVE_PASSES = 3.0
+CAPTURED_POINTS_SCALE = 100.0
 
 PHASES: tuple[PhaseName, ...] = (
     "grand_tichu",
@@ -37,14 +46,7 @@ PHASES: tuple[PhaseName, ...] = (
     "dragon_gift",
     "round_over",
 )
-CONFIG_KEYS: tuple[str, ...] = (
-    "grand_tichu",
-    "small_tichu",
-    "card_exchange",
-    "bombs",
-    "wishes",
-    "special_cards",
-)
+CONFIG_KEYS = POLICY_CONFIG_KEYS
 COMBINATION_KINDS: tuple[str, ...] = tuple(kind.value for kind in CombinationKind)
 ACTION_TYPES: tuple[str, ...] = (
     "grand_tichu",
@@ -56,6 +58,11 @@ ACTION_TYPES: tuple[str, ...] = (
     "dragon_gift",
 )
 WISH_RANKS: tuple[int | None, ...] = (None,) + tuple(range(2, 15))
+BOMB_CLOSE_BEHAVIORS: tuple[BombCloseBehaviorName | None, ...] = (
+    None,
+    "continue",
+    "resolve_trick",
+)
 
 PHASE_INDEX = {phase: index for index, phase in enumerate(PHASES)}
 COMBINATION_KIND_INDEX = {
@@ -77,19 +84,29 @@ COMBINATION_PHOENIX_RANK_OFFSET = COMBINATION_PHOENIX_PRESENT_OFFSET + 1
 COMBINATION_FEATURE_SIZE = COMBINATION_PHOENIX_RANK_OFFSET + 1
 
 OBS_HAND_MASK_OFFSET = 0
-OBS_PUBLIC_CARD_MASK_OFFSET = OBS_HAND_MASK_OFFSET + CARD_COUNT
-OBS_PHASE_OFFSET = OBS_PUBLIC_CARD_MASK_OFFSET + CARD_COUNT
+OBS_PLAYED_CARD_MASKS_OFFSET = OBS_HAND_MASK_OFFSET + CARD_COUNT
+OBS_CAPTURED_CARD_MASKS_OFFSET = OBS_PLAYED_CARD_MASKS_OFFSET + PLAYER_COUNT * CARD_COUNT
+OBS_CURRENT_TRICK_MASK_OFFSET = OBS_CAPTURED_CARD_MASKS_OFFSET + PLAYER_COUNT * CARD_COUNT
+OBS_PHASE_OFFSET = OBS_CURRENT_TRICK_MASK_OFFSET + CARD_COUNT
 OBS_CURRENT_PLAYER_OFFSET = OBS_PHASE_OFFSET + len(PHASES)
-OBS_PLAYER_OFFSET = OBS_CURRENT_PLAYER_OFFSET + PLAYER_COUNT + 1
-OBS_TEAM_OFFSET = OBS_PLAYER_OFFSET + PLAYER_COUNT
-OBS_HAND_SIZES_OFFSET = OBS_TEAM_OFFSET + TEAM_COUNT
+OBS_DEALER_OFFSET = OBS_CURRENT_PLAYER_OFFSET + PLAYER_COUNT + 1
+OBS_HAND_SIZES_OFFSET = OBS_DEALER_OFFSET + PLAYER_COUNT
 OBS_CONFIG_OFFSET = OBS_HAND_SIZES_OFFSET + PLAYER_COUNT
 OBS_TOP_COMBINATION_OFFSET = OBS_CONFIG_OFFSET + len(CONFIG_KEYS)
-OBS_WISH_RANK_OFFSET = OBS_TOP_COMBINATION_OFFSET + COMBINATION_FEATURE_SIZE
+OBS_TOP_PLAYER_OFFSET = OBS_TOP_COMBINATION_OFFSET + COMBINATION_FEATURE_SIZE
+OBS_CONSECUTIVE_PASSES_OFFSET = OBS_TOP_PLAYER_OFFSET + PLAYER_COUNT + 1
+OBS_BOMB_QUEUE_OFFSET = OBS_CONSECUTIVE_PASSES_OFFSET + 1
+OBS_BOMB_RESUME_PLAYER_OFFSET = OBS_BOMB_QUEUE_OFFSET + PLAYER_COUNT * (PLAYER_COUNT + 1)
+OBS_BOMB_CLOSE_BEHAVIOR_OFFSET = OBS_BOMB_RESUME_PLAYER_OFFSET + PLAYER_COUNT + 1
+OBS_WISH_RANK_OFFSET = OBS_BOMB_CLOSE_BEHAVIOR_OFFSET + len(BOMB_CLOSE_BEHAVIORS)
 OBS_FINISH_ORDER_OFFSET = OBS_WISH_RANK_OFFSET + len(WISH_RANKS)
 OBS_TICHU_CALLS_OFFSET = OBS_FINISH_ORDER_OFFSET + PLAYER_COUNT
-OBS_ROUND_SCORES_OFFSET = OBS_TICHU_CALLS_OFFSET + PLAYER_COUNT
-OBSERVATION_FEATURE_SIZE = OBS_ROUND_SCORES_OFFSET + TEAM_COUNT
+OBS_HAS_PLAYED_CARD_OFFSET = OBS_TICHU_CALLS_OFFSET + PLAYER_COUNT
+OBS_CAPTURED_POINTS_OFFSET = OBS_HAS_PLAYED_CARD_OFFSET + PLAYER_COUNT
+OBS_PRIVATE_EXCHANGE_PRESENT_OFFSET = OBS_CAPTURED_POINTS_OFFSET + PLAYER_COUNT
+OBS_EXCHANGE_SENT_OFFSET = OBS_PRIVATE_EXCHANGE_PRESENT_OFFSET + 1
+OBS_EXCHANGE_RECEIVED_OFFSET = OBS_EXCHANGE_SENT_OFFSET + PLAYER_COUNT * CARD_COUNT
+OBSERVATION_FEATURE_SIZE = OBS_EXCHANGE_RECEIVED_OFFSET + PLAYER_COUNT * CARD_COUNT
 
 ACTION_TYPE_OFFSET = 0
 ACTION_CARD_MASK_OFFSET = ACTION_TYPE_OFFSET + len(ACTION_TYPES)
@@ -108,25 +125,41 @@ class EncodedAction:
 
 
 def encode_observation(observation: RoundObservation) -> FeatureVector:
-    hand_ids = (card["card_id"] for card in observation["hand"])
+    return encode_policy_observation(policy_view(observation))
+
+
+def encode_policy_observation(observation: PolicyObservation) -> FeatureVector:
+    exchange = observation.private_exchange
     return (
-        encode_card_mask(hand_ids)
-        + _public_card_mask(observation["public_history"])
-        + _one_hot(observation["phase"], PHASES)
-        + _optional_player_features(observation["current_player"])
-        + _player_features(observation["player"])
-        + _one_hot(observation["team"], range(TEAM_COUNT))
-        + _scaled_values(observation["hand_sizes"], MAX_HAND_SIZE)
-        + _config_features(observation["config"])
-        + _encode_combination(observation["top_combination"])
-        + _optional_rank_features(observation["wish_rank"])
-        + _finish_order_features(observation["finish_order"])
-        + _tichu_call_features(observation["tichu_calls"])
-        + _round_score_features(observation["round_scores"])
+        encode_card_mask(observation.hand_card_ids)
+        + _player_card_masks(observation.played_card_ids)
+        + _player_card_masks(observation.captured_card_ids)
+        + encode_card_mask(observation.current_trick_card_ids)
+        + _one_hot(observation.phase, PHASES)
+        + _optional_player_features(observation.current_player)
+        + _player_features(observation.dealer)
+        + _scaled_values(observation.hand_sizes, MAX_HAND_SIZE)
+        + tuple(1.0 if enabled else 0.0 for enabled in observation.config)
+        + _encode_combination(observation.top_combination)
+        + _optional_player_features(observation.top_player)
+        + (float(observation.consecutive_passes) / MAX_CONSECUTIVE_PASSES,)
+        + _player_sequence_features(observation.bomb_queue)
+        + _optional_player_features(observation.bomb_resume_player)
+        + _one_hot(observation.bomb_close_behavior, BOMB_CLOSE_BEHAVIORS)
+        + _optional_rank_features(observation.wish_rank)
+        + _finish_order_features(observation.finish_order)
+        + _tichu_call_features(observation.tichu_calls)
+        + tuple(1.0 if played else 0.0 for played in observation.has_played_card)
+        + _scaled_values(observation.captured_points, CAPTURED_POINTS_SCALE)
+        + (1.0 if exchange is not None else 0.0,)
+        + _exchange_card_features(None if exchange is None else exchange.sent)
+        + _exchange_card_features(None if exchange is None else exchange.received)
     )
 
 
-def encode_action(action: Action) -> FeatureVector:
+def encode_action(action: Action, *, observer: int) -> FeatureVector:
+    if observer not in range(PLAYER_COUNT):
+        raise ValueError(f"observer must be between 0 and {PLAYER_COUNT - 1}: {observer}")
     action_type = _action_type(action)
     combination = _action_combination(action)
     card_ids = _action_card_ids(action)
@@ -135,14 +168,21 @@ def encode_action(action: Action) -> FeatureVector:
         + encode_card_mask(card_ids)
         + _encode_combination(combination)
         + _optional_rank_features(_action_wish_rank(action))
-        + _player_features(_action_target_player(action))
+        + _player_features(_action_target_player(action, observer))
         + (_action_tichu_value(action),)
-        + _exchange_transfer_features(action)
+        + _exchange_transfer_features(action, observer)
     )
 
 
-def encode_legal_actions(actions: Sequence[Action]) -> tuple[EncodedAction, ...]:
-    return tuple(EncodedAction(action, encode_action(action)) for action in actions)
+def encode_legal_actions(
+    actions: Sequence[Action],
+    *,
+    observer: int,
+) -> tuple[EncodedAction, ...]:
+    return tuple(
+        EncodedAction(action, encode_action(action, observer=observer))
+        for action in actions
+    )
 
 
 def encode_card_mask(card_ids: Iterable[int]) -> FeatureVector:
@@ -153,6 +193,16 @@ def encode_card_mask(card_ids: Iterable[int]) -> FeatureVector:
             raise ValueError(f"card_id must be between 0 and {CARD_COUNT - 1}: {card_id}")
         values[card_id] = 1.0
     return tuple(values)
+
+
+def _player_card_masks(card_ids: Sequence[Iterable[int]]) -> FeatureVector:
+    if len(card_ids) != PLAYER_COUNT:
+        raise ValueError("Player card groups must contain exactly four entries")
+    return tuple(
+        value
+        for player_cards in card_ids
+        for value in encode_card_mask(player_cards)
+    )
 
 
 def _one_hot(value: T, choices: Iterable[T]) -> FeatureVector:
@@ -173,6 +223,19 @@ def _optional_player_features(player: int | None) -> FeatureVector:
     return _player_features(player) + (0.0,)
 
 
+def _player_sequence_features(players: Sequence[int]) -> FeatureVector:
+    if len(players) > PLAYER_COUNT:
+        raise ValueError("A player sequence cannot contain more than four entries")
+    padded: tuple[int | None, ...] = tuple(players) + (None,) * (
+        PLAYER_COUNT - len(players)
+    )
+    return tuple(
+        feature
+        for player in padded
+        for feature in _optional_player_features(player)
+    )
+
+
 def _optional_rank_features(rank: int | None) -> FeatureVector:
     if rank is not None and rank not in range(2, 15):
         raise ValueError(f"rank must be between 2 and 14 or None: {rank}")
@@ -181,18 +244,6 @@ def _optional_rank_features(rank: int | None) -> FeatureVector:
 
 def _scaled_values(values: Iterable[int | float], scale: float) -> FeatureVector:
     return tuple(float(value) / scale for value in values)
-
-
-def _config_features(config: Mapping[str, bool]) -> FeatureVector:
-    return tuple(1.0 if bool(config.get(key, False)) else 0.0 for key in CONFIG_KEYS)
-
-
-def _round_score_features(scores: tuple[int, int] | None) -> FeatureVector:
-    if scores is None:
-        return (0.0, 0.0)
-    if len(scores) != TEAM_COUNT:
-        raise ValueError("round_scores must contain exactly two values")
-    return _scaled_values(scores, SCORE_SCALE)
 
 
 def _finish_order_features(finish_order: Sequence[int]) -> FeatureVector:
@@ -204,27 +255,29 @@ def _finish_order_features(finish_order: Sequence[int]) -> FeatureVector:
     return tuple(values)
 
 
-def _tichu_call_features(calls: Mapping[int, int]) -> FeatureVector:
-    values: list[float] = []
-    for player in range(PLAYER_COUNT):
-        raw = calls.get(player)
-        values.append(0.0 if raw is None else float(raw) / 200.0)
+def _tichu_call_features(calls: Sequence[int | None]) -> FeatureVector:
+    if len(calls) != PLAYER_COUNT:
+        raise ValueError("Tichu calls must contain exactly four entries")
+    return tuple(0.0 if value is None else float(value) / 200.0 for value in calls)
+
+
+def _exchange_card_features(
+    transfers: Sequence[PolicyExchangeCard] | None,
+) -> FeatureVector:
+    values = [0.0] * (PLAYER_COUNT * CARD_COUNT)
+    if transfers is None:
+        return tuple(values)
+    for transfer in transfers:
+        if transfer.player not in range(PLAYER_COUNT):
+            raise ValueError(f"Invalid relative exchange player: {transfer.player}")
+        if transfer.card_id not in range(CARD_COUNT):
+            raise ValueError(f"Invalid exchange card ID: {transfer.card_id}")
+        values[transfer.player * CARD_COUNT + transfer.card_id] = 1.0
     return tuple(values)
 
 
-def _public_card_mask(public_history: Sequence[Mapping[str, object]]) -> FeatureVector:
-    card_ids: list[int] = []
-    for event in public_history:
-        combination = event.get("combination")
-        if isinstance(combination, Mapping):
-            raw_card_ids = combination.get("card_ids")
-            if raw_card_ids is not None:
-                card_ids.extend(_card_ids_from_object(raw_card_ids, "public combination card_ids"))
-    return encode_card_mask(card_ids)
-
-
 def _encode_combination(
-    combination: Combination | CombinationObservation | None,
+    combination: Combination | PolicyCombination | None,
 ) -> FeatureVector:
     if combination is None:
         return (0.0,) * COMBINATION_FEATURE_SIZE
@@ -247,58 +300,38 @@ def _encode_combination(
 
 
 def _combination_card_ids(
-    combination: Combination | CombinationObservation,
+    combination: Combination | PolicyCombination,
 ) -> tuple[int, ...]:
-    if isinstance(combination, Combination):
-        return combination.card_ids
-    return tuple(combination["card_ids"])
+    return combination.card_ids
 
 
 def _combination_kind(
-    combination: Combination | CombinationObservation,
+    combination: Combination | PolicyCombination,
 ) -> str:
     if isinstance(combination, Combination):
         return combination.kind.value
-    kind = combination["kind"]
+    kind = combination.kind
     if kind not in COMBINATION_KIND_INDEX:
         raise ValueError(f"Unsupported combination kind: {kind!r}")
     return kind
 
 
 def _combination_primary_rank(
-    combination: Combination | CombinationObservation,
+    combination: Combination | PolicyCombination,
 ) -> float:
-    if isinstance(combination, Combination):
-        return float(combination.primary_rank)
-    return float(combination["primary_rank"])
+    return float(combination.primary_rank)
 
 
 def _combination_length(
-    combination: Combination | CombinationObservation,
+    combination: Combination | PolicyCombination,
 ) -> int:
-    if isinstance(combination, Combination):
-        return combination.length
-    return int(combination["length"])
+    return int(combination.length)
 
 
 def _combination_phoenix_as(
-    combination: Combination | CombinationObservation,
+    combination: Combination | PolicyCombination,
 ) -> int | None:
-    if isinstance(combination, Combination):
-        return combination.phoenix_as
-    return combination["phoenix_as"]
-
-
-def _card_ids_from_object(raw: object, context: str) -> tuple[int, ...]:
-    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-        raise ValueError(f"{context} must be a sequence")
-
-    card_ids: list[int] = []
-    for value in raw:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ValueError(f"{context} must contain only integer card IDs")
-        card_ids.append(value)
-    return tuple(card_ids)
+    return combination.phoenix_as
 
 
 def _action_type(action: Action) -> str:
@@ -340,9 +373,9 @@ def _action_wish_rank(action: Action) -> int | None:
     return None
 
 
-def _action_target_player(action: Action) -> int | None:
+def _action_target_player(action: Action, observer: int) -> int | None:
     if isinstance(action, DragonGiftAction):
-        return action.recipient
+        return relative_player(action.recipient, observer)
     return None
 
 
@@ -354,15 +387,14 @@ def _action_tichu_value(action: Action) -> float:
     return 0.0
 
 
-def _exchange_transfer_features(action: Action) -> FeatureVector:
+def _exchange_transfer_features(action: Action, observer: int) -> FeatureVector:
     values = [0.0] * (PLAYER_COUNT * CARD_COUNT)
     if not isinstance(action, ExchangeAction):
         return tuple(values)
 
     for recipient, card_id in action.transfers:
-        if recipient not in range(PLAYER_COUNT):
-            raise ValueError(f"recipient must be between 0 and {PLAYER_COUNT - 1}: {recipient}")
+        relative_recipient = relative_player(recipient, observer)
         if card_id < 0 or card_id >= CARD_COUNT:
             raise ValueError(f"card_id must be between 0 and {CARD_COUNT - 1}: {card_id}")
-        values[recipient * CARD_COUNT + card_id] = 1.0
+        values[relative_recipient * CARD_COUNT + card_id] = 1.0
     return tuple(values)

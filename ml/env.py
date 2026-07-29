@@ -12,8 +12,9 @@ from .encoding import (
     EncodedAction,
     FeatureVector,
     encode_legal_actions,
-    encode_observation,
+    encode_policy_observation,
 )
+from .policy_view import PolicyObservation, policy_view
 
 RewardMode: TypeAlias = Literal["team_diff", "team_score"]
 PlayerRewards: TypeAlias = tuple[float, float, float, float]
@@ -22,10 +23,10 @@ TeamRewards: TypeAlias = tuple[float, float]
 
 @dataclass(frozen=True, slots=True)
 class TichuEnvState:
-    round: TichuRound
     steps: int
     player: int | None
     observation: RoundObservation | None
+    policy_observation: PolicyObservation | None
     observation_features: FeatureVector | None
     legal_actions: tuple[Action, ...]
     encoded_actions: tuple[EncodedAction, ...]
@@ -138,10 +139,10 @@ def encode_env_state(
 
     if round_.terminal:
         return TichuEnvState(
-            round=round_,
             steps=steps,
             player=None,
             observation=None,
+            policy_observation=None,
             observation_features=None,
             legal_actions=(),
             encoded_actions=(),
@@ -154,15 +155,16 @@ def encode_env_state(
         raise RuntimeError("Non-terminal round has no current player")
 
     observation = round_.observation(player)
+    policy_observation = policy_view(observation)
     legal_actions = round_.legal_actions()
     return TichuEnvState(
-        round=round_,
         steps=steps,
         player=player,
         observation=observation,
-        observation_features=encode_observation(observation),
+        policy_observation=policy_observation,
+        observation_features=encode_policy_observation(policy_observation),
         legal_actions=legal_actions,
-        encoded_actions=encode_legal_actions(legal_actions),
+        encoded_actions=encode_legal_actions(legal_actions, observer=player),
         rewards=(0.0, 0.0, 0.0, 0.0),
         terminal=False,
     )

@@ -32,10 +32,12 @@ def test_env_reset_returns_encoded_turn_state() -> None:
 
     assert env.seed == 1
     assert env.dealer == 2
-    assert state.round is env.round
     assert state.steps == 0
-    assert state.player == state.round.current_player
+    assert state.player == env.round.current_player
+    assert not hasattr(state, "round")
     assert state.observation is not None
+    assert state.policy_observation is not None
+    assert state.policy_observation.current_player == 0
     assert state.observation_features is not None
     assert len(state.observation_features) == OBSERVATION_FEATURE_SIZE
     assert state.action_count == len(state.legal_actions)
@@ -47,14 +49,13 @@ def test_env_reset_returns_encoded_turn_state() -> None:
 
 def test_env_steps_by_legal_action_index() -> None:
     env = TichuEnv(config=_fast_config(), seed=0, dealer=0)
-    before = env.state()
+    before_round = env.round
 
     after = env.step(0)
 
     assert after.steps == 1
     assert env.steps == 1
-    assert after.round is env.round
-    assert after.round != before.round
+    assert env.round != before_round
 
 
 def test_env_rejects_invalid_index_and_illegal_action() -> None:
@@ -65,6 +66,28 @@ def test_env_rejects_invalid_index_and_illegal_action() -> None:
         env.step(state.action_count)
     with pytest.raises(ValueError, match="Illegal action"):
         env.step_action(PassAction())
+
+
+def test_env_encodes_a_complete_full_rules_round() -> None:
+    env = TichuEnv(seed=7, dealer=3)
+    state = env.state()
+
+    while not state.terminal:
+        assert state.player is not None
+        assert state.policy_observation is not None
+        assert state.policy_observation.current_player == 0
+        assert state.observation_features is not None
+        assert len(state.observation_features) == OBSERVATION_FEATURE_SIZE
+        assert state.encoded_actions
+        assert all(
+            len(action.features) == ACTION_FEATURE_SIZE
+            for action in state.encoded_actions
+        )
+        state = env.step(0)
+
+    assert state.rewards[0] == state.rewards[2]
+    assert state.rewards[1] == state.rewards[3]
+    assert state.rewards[0] == -state.rewards[1]
 
 
 def test_encode_terminal_env_state_uses_team_diff_rewards() -> None:
@@ -81,6 +104,7 @@ def test_encode_terminal_env_state_uses_team_diff_rewards() -> None:
 
     assert state.terminal
     assert state.observation is None
+    assert state.policy_observation is None
     assert state.observation_features is None
     assert state.legal_actions == ()
     assert state.encoded_actions == ()

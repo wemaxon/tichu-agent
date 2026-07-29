@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import permutations
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Sequence, cast
 
 from .actions import (
     Action,
@@ -28,7 +28,14 @@ from .combinations import (
     generate_combinations,
     resolve_for_context,
 )
-from .observations import CombinationObservation, PhaseName, RoundObservation
+from .observations import (
+    BombCloseBehaviorName,
+    CombinationObservation,
+    ExchangeCardObservation,
+    PhaseName,
+    PrivateExchangeObservation,
+    RoundObservation,
+)
 
 PlayerCards = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]
 PlayerFlags = tuple[bool, bool, bool, bool]
@@ -912,22 +919,83 @@ class TichuRound:
             consecutive_passes=0,
         )
 
+    def _played_cards_by_player(self) -> PlayerCards:
+        played: list[list[int]] = [[], [], [], []]
+        for record in self.action_records:
+            action = record.action
+            if isinstance(action, PlayAction):
+                played[record.player].extend(action.combination.card_ids)
+            elif isinstance(action, BombAction) and action.combination is not None:
+                played[record.player].extend(action.combination.card_ids)
+        return _player_cards(played)
+
+    def _private_exchange_observation(
+        self,
+        player: int,
+    ) -> PrivateExchangeObservation | None:
+        if not self.config.card_exchange or self.phase is Phase.EXCHANGE:
+            return None
+
+        exchanges = {
+            record.player: record.action
+            for record in self.action_records
+            if isinstance(record.action, ExchangeAction)
+        }
+        if len(exchanges) != 4:
+            return None
+
+        own_exchange = exchanges[player]
+        sent = [
+            ExchangeCardObservation(player=recipient, card_id=card_id)
+            for recipient, card_id in own_exchange.transfers
+        ]
+        received = sorted(
+            (
+                ExchangeCardObservation(player=sender, card_id=card_id)
+                for sender, exchange in exchanges.items()
+                for recipient, card_id in exchange.transfers
+                if recipient == player
+            ),
+            key=lambda transfer: transfer["player"],
+        )
+        if len(sent) != 3 or len(received) != 3:
+            raise AssertionError("A completed exchange must send and receive three cards")
+        return PrivateExchangeObservation(sent=sent, received=received)
+
     def observation(self, player: int) -> RoundObservation:
         if player not in range(4):
             raise ValueError("player must be 0, 1, 2, or 3")
+        played_cards = self._played_cards_by_player()
         return RoundObservation(
             config=self.config.to_dict(),
             phase=_phase_name(self.phase),
             current_player=self.current_player,
             player=player,
             team=team_of(player),
+            dealer=self.dealer,
             hand=[
                 {"card_id": card_id, "label": CARD_BY_ID[card_id].label}
                 for card_id in sorted(self.hands[player])
             ],
             hand_sizes=[len(self.hands[p]) for p in range(4)],
+            played_card_ids=[list(played_cards[p]) for p in range(4)],
+            captured_card_ids=[list(self.captured[p]) for p in range(4)],
+            captured_points=[
+                sum(CARD_BY_ID[card_id].points for card_id in self.captured[p])
+                for p in range(4)
+            ],
+            current_trick_card_ids=list(self.trick_cards),
             top_combination=(
                 None if self.top_combination is None else _combination_observation(self.top_combination)
+            ),
+            top_player=self.last_play_player,
+            consecutive_passes=self.consecutive_passes,
+            bomb_queue=list(self.bomb_queue),
+            bomb_resume_player=self.bomb_resume_player,
+            bomb_close_behavior=(
+                None
+                if self.bomb_close_behavior is None
+                else cast(BombCloseBehaviorName, self.bomb_close_behavior.value)
             ),
             wish_rank=self.wish_rank,
             finish_order=list(self.finish_order),
@@ -936,6 +1004,8 @@ class TichuRound:
                 for player_id, value in enumerate(self.tichu_calls)
                 if value is not None
             },
+            has_played_card=list(self.has_played_card),
+            private_exchange=self._private_exchange_observation(player),
             public_history=list(self.public_history),
             round_scores=self.round_scores,
         )

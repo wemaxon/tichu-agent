@@ -70,9 +70,10 @@ def test_observation_encoder_has_stable_shape_and_hand_mask() -> None:
 
 def test_legal_action_encoder_preserves_actions_and_shape() -> None:
     round_ = TichuRound.new(seed=1, dealer=0)
+    assert round_.current_player is not None
     actions = round_.legal_actions()
 
-    encoded = encode_legal_actions(actions)
+    encoded = encode_legal_actions(actions, observer=round_.current_player)
 
     assert tuple(item.action for item in encoded) == actions
     assert all(len(item.features) == ACTION_FEATURE_SIZE for item in encoded)
@@ -85,7 +86,7 @@ def test_play_action_encoder_marks_type_cards_combination_and_wish() -> None:
     )
     action = PlayAction(mahjong, wish_rank=5)
 
-    features = encode_action(action)
+    features = encode_action(action, observer=0)
 
     assert len(features) == ACTION_FEATURE_SIZE
     assert features[ACTION_TYPE_OFFSET + ACTION_TYPE_INDEX["play"]] == 1.0
@@ -97,7 +98,7 @@ def test_play_action_encoder_marks_type_cards_combination_and_wish() -> None:
 def test_exchange_action_encoder_marks_recipient_card_matrix() -> None:
     action = ExchangeAction(((1, 0), (2, 26), (3, 55)))
 
-    features = encode_action(action)
+    features = encode_action(action, observer=0)
 
     assert features[ACTION_TYPE_OFFSET + ACTION_TYPE_INDEX["exchange"]] == 1.0
     assert features[ACTION_CARD_MASK_OFFSET + 0] == 1.0
@@ -109,10 +110,10 @@ def test_exchange_action_encoder_marks_recipient_card_matrix() -> None:
 
 
 def test_tichu_and_dragon_action_specific_fields() -> None:
-    grand_call = encode_action(GrandTichuDecision(True))
-    grand_decline = encode_action(GrandTichuDecision(False))
-    small_tichu = encode_action(DeclareSmallTichu())
-    dragon_gift = encode_action(DragonGiftAction(3))
+    grand_call = encode_action(GrandTichuDecision(True), observer=0)
+    grand_decline = encode_action(GrandTichuDecision(False), observer=0)
+    small_tichu = encode_action(DeclareSmallTichu(), observer=0)
+    dragon_gift = encode_action(DragonGiftAction(3), observer=0)
 
     assert grand_call[ACTION_TICHU_VALUE_OFFSET] == 1.0
     assert grand_decline[ACTION_TICHU_VALUE_OFFSET] == 0.0
