@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from agents import Agent, create_agent
+from scripts.round_runner import round_config_from_args
 from tichu.actions import (
     Action,
     BombAction,
@@ -18,7 +19,6 @@ from tichu.actions import (
 )
 from tichu.cards import CARD_BY_ID, Special
 from tichu.combinations import Combination, CombinationKind
-from tichu.config import TichuRoundConfig
 from tichu.round import Phase, TichuRound, partner_of, team_of
 
 
@@ -28,7 +28,7 @@ class ConsoleQuit(Exception):
 
 def command_console(args: argparse.Namespace) -> int:
     human = int(args.seat)
-    config = _round_config_from_args(args)
+    config = round_config_from_args(args)
     agent_names = _agent_names_from_args(args)
     agents = _build_agents(agent_names, human, int(args.seed))
 
@@ -86,17 +86,6 @@ def run_console_round(
             raise RuntimeError("Round exceeded the safety step limit")
 
     return round_
-
-
-def _round_config_from_args(args: argparse.Namespace) -> TichuRoundConfig:
-    return TichuRoundConfig(
-        grand_tichu=args.grand_tichu,
-        small_tichu=args.small_tichu,
-        card_exchange=args.card_exchange,
-        bombs=args.bombs,
-        wishes=args.wishes,
-        special_cards=args.special_cards,
-    )
 
 
 def _agent_names_from_args(args: argparse.Namespace) -> tuple[str, str, str]:

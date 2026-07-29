@@ -9,6 +9,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents import Agent, available_agent_names, create_agent
+from scripts.round_runner import add_round_config_args, play_agent_round, round_config_from_args
 from scripts.tichu_console import command_console
 from tichu.config import TichuRoundConfig
 from tichu.round import TichuRound
@@ -22,33 +23,13 @@ def play_round(
     verbose: bool = False,
     config: TichuRoundConfig | None = None,
 ) -> TichuRound:
-    if len(agents) != 4:
-        raise ValueError("Exactly four agents are required")
-
-    round_ = TichuRound.new(seed=seed, dealer=dealer, config=config)
-    steps = 0
-    while not round_.terminal:
-        player = round_.current_player
-        assert player is not None
-        action = agents[player].choose_action(round_.observation(player), round_.legal_actions())
-        if verbose:
-            print(f"{steps:04d} P{player} [{round_.phase.value}] {action}")
-        round_ = round_.apply(action)
-        steps += 1
-        if steps > 20_000:
-            raise RuntimeError("Round exceeded the safety step limit")
-    return round_
-
-
-def _round_config_from_args(args: argparse.Namespace) -> TichuRoundConfig:
-    return TichuRoundConfig(
-        grand_tichu=args.grand_tichu,
-        small_tichu=args.small_tichu,
-        card_exchange=args.card_exchange,
-        bombs=args.bombs,
-        wishes=args.wishes,
-        special_cards=args.special_cards,
-    )
+    return play_agent_round(
+        seed=seed,
+        dealer=dealer,
+        agents=agents,
+        verbose=verbose,
+        config=config,
+    ).round
 
 
 def _agent_names_from_args(args: argparse.Namespace) -> tuple[str, str, str, str]:
@@ -65,7 +46,7 @@ def _build_agents(agent_names: tuple[str, str, str, str], seed: int) -> list[Age
 
 
 def command_play(args: argparse.Namespace) -> int:
-    config = _round_config_from_args(args)
+    config = round_config_from_args(args)
     agent_names = _agent_names_from_args(args)
     aggregate = [0, 0]
     rounds: list[TichuRound] = []
@@ -127,23 +108,6 @@ def command_agents(_: argparse.Namespace) -> int:
     return 0
 
 
-def _add_round_config_args(parser: argparse.ArgumentParser) -> None:
-    parser.set_defaults(
-        grand_tichu=True,
-        small_tichu=True,
-        card_exchange=True,
-        bombs=True,
-        wishes=True,
-        special_cards=True,
-    )
-    parser.add_argument("--no-grand-tichu", "--no-big-tichu", dest="grand_tichu", action="store_false")
-    parser.add_argument("--no-small-tichu", dest="small_tichu", action="store_false")
-    parser.add_argument("--no-exchange", "--no-card-exchange", dest="card_exchange", action="store_false")
-    parser.add_argument("--no-bombs", dest="bombs", action="store_false")
-    parser.add_argument("--no-wishes", dest="wishes", action="store_false")
-    parser.add_argument("--no-special-cards", dest="special_cards", action="store_false")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tichu simulation utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -167,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("P0", "P1", "P2", "P3"),
         help="Agents for players 0, 1, 2, and 3",
     )
-    _add_round_config_args(play)
+    add_round_config_args(play)
     play.set_defaults(func=command_play)
 
     console = subparsers.add_parser("console", help="Play one round from an interactive console")
@@ -188,7 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("A0", "A1", "A2"),
         help="Agents for the three non-human players in player order",
     )
-    _add_round_config_args(console)
+    add_round_config_args(console)
     console.set_defaults(func=command_console)
 
     replay = subparsers.add_parser("replay", help="Verify a saved replay")
