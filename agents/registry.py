@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .base import Agent
+from .greedy import GreedyAgent
 from .random import RandomAgent
 
 
@@ -13,7 +14,13 @@ def _random_agent(seed: int) -> Agent:
     return RandomAgent(seed=seed, bomb_probability=0.15)
 
 
+def _greedy_agent(seed: int) -> Agent:
+    _ = seed
+    return GreedyAgent()
+
+
 _AGENT_FACTORIES: dict[str, AgentFactory] = {
+    "greedy": _greedy_agent,
     "random": _random_agent,
 }
 
