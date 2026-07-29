@@ -22,7 +22,7 @@ python -m scripts.tichu_cli play --seed 10 --rounds 1 --verbose
 Select agents per player:
 
 ```bash
-python -m scripts.tichu_cli play --agents random random greedy greedy
+python -m scripts.tichu_cli play --agents random random greedy heuristic
 ```
 
 #### Play from the console
@@ -42,19 +42,16 @@ Available agents:
 - `greedy`: deterministic baseline that declines Tichu calls, exchanges low cards,
   avoids bombs unless they finish the hand, and otherwise plays the cheapest useful
   legal combination.
+- `heuristic`: deterministic rule-based baseline with hand-strength Tichu calls,
+  partner-aware exchange/pass decisions, and conservative tactical bomb use.
 
-### Evaluation
+## Evaluation
 
 Benchmark two agents with paired rounds:
 
 ```bash
-python -m scripts.benchmark_agents --agent-a greedy --agent-b random --round-pairs 100
+python -m scripts.benchmark_agents --agent-a greedy --agent-b random --round-pairs 100 --json results.json --csv rounds.csv
 ```
 
 Each round pair uses the same seed and dealer twice, swapping which team uses
-agent A and agent B. This reduces seat and deal bias. Per-round data can be
-saved for later analysis:
-
-```bash
-python -m scripts.benchmark_agents --agent-a greedy --agent-b random --round-pairs 100 --json results.json --csv rounds.csv
-```
+agent A and agent B. This reduces seat and deal bias.

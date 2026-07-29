@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from .base import Agent
 from .greedy import GreedyAgent
+from .heuristic import HeuristicAgent
 from .random import RandomAgent
 
 
@@ -19,8 +20,14 @@ def _greedy_agent(seed: int) -> Agent:
     return GreedyAgent()
 
 
+def _heuristic_agent(seed: int) -> Agent:
+    _ = seed
+    return HeuristicAgent()
+
+
 _AGENT_FACTORIES: dict[str, AgentFactory] = {
     "greedy": _greedy_agent,
+    "heuristic": _heuristic_agent,
     "random": _random_agent,
 }
 
