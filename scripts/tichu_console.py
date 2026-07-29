@@ -75,7 +75,7 @@ def run_console_round(
             action = _prompt_human_action(round_, human)
         else:
             agent = agents[player]
-            action = agent.choose_action(round_)
+            action = agent.choose_action(round_.observation(player), round_.legal_actions())
 
         before_events = len(round_.public_history)
         round_ = round_.apply(action)

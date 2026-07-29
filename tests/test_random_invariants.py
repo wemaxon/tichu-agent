@@ -42,7 +42,7 @@ def play_checked_round(seed: int, config: TichuRoundConfig) -> TichuRound:
         assert player is not None, "Non-terminal round has no current player"
         legal_actions = round_.legal_actions()
         assert legal_actions, f"No legal actions in phase {round_.phase}"
-        action = agents[player].choose_action(round_)
+        action = agents[player].choose_action(round_.observation(player), legal_actions)
         assert action in legal_actions, f"Agent chose illegal action: {action}"
         round_ = round_.apply(action)
         steps += 1

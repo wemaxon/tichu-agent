@@ -10,7 +10,8 @@ Agents or humans can connect using the following API:
 player = round_.current_player
 observation = round_.observation(player)
 legal_actions = round_.legal_actions()
-round_ = round_.apply(selected_action)
+action = agent.choose_action(observation, legal_actions)
+round_ = round_.apply(action)
 ```
 
 #### Run a simulation with random agents
@@ -31,3 +32,8 @@ python -m scripts.tichu_cli console --seat 0 --agent random
 
 This controls one human seat and assigns agents to the other three seats,
 including the human player's partner.
+
+
+## Agents
+
+### Evaluation

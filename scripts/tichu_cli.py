@@ -30,7 +30,7 @@ def play_round(
     while not round_.terminal:
         player = round_.current_player
         assert player is not None
-        action = agents[player].choose_action(round_)
+        action = agents[player].choose_action(round_.observation(player), round_.legal_actions())
         if verbose:
             print(f"{steps:04d} P{player} [{round_.phase.value}] {action}")
         round_ = round_.apply(action)

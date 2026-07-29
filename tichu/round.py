@@ -28,6 +28,7 @@ from .combinations import (
     generate_combinations,
     resolve_for_context,
 )
+from .observations import CombinationObservation, PhaseName, RoundObservation
 
 PlayerCards = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]
 PlayerFlags = tuple[bool, bool, bool, bool]
@@ -53,6 +54,18 @@ class Phase(str, Enum):
 class BombCloseBehavior(str, Enum):
     CONTINUE = "continue"
     RESOLVE_TRICK = "resolve_trick"
+
+
+def _phase_name(phase: Phase) -> PhaseName:
+    names: dict[Phase, PhaseName] = {
+        Phase.GRAND_TICHU: "grand_tichu",
+        Phase.EXCHANGE: "exchange",
+        Phase.PLAY: "play",
+        Phase.BOMB_WINDOW: "bomb_window",
+        Phase.DRAGON_GIFT: "dragon_gift",
+        Phase.ROUND_OVER: "round_over",
+    }
+    return names[phase]
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +236,16 @@ def _event(**values: Any) -> PublicEvent:
 
 def _event_to_dict(event: PublicEvent) -> dict[str, Any]:
     return {key: _thaw_json(value) for key, value in event}
+
+
+def _combination_observation(combo: Combination) -> CombinationObservation:
+    return {
+        "card_ids": list(combo.card_ids),
+        "kind": combo.kind.value,
+        "primary_rank": combo.primary_rank,
+        "length": combo.length,
+        "phoenix_as": combo.phoenix_as,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -889,33 +912,33 @@ class TichuRound:
             consecutive_passes=0,
         )
 
-    def observation(self, player: int) -> dict[str, Any]:
+    def observation(self, player: int) -> RoundObservation:
         if player not in range(4):
             raise ValueError("player must be 0, 1, 2, or 3")
-        return {
-            "config": self.config.to_dict(),
-            "phase": self.phase.value,
-            "current_player": self.current_player,
-            "player": player,
-            "team": team_of(player),
-            "hand": [
+        return RoundObservation(
+            config=self.config.to_dict(),
+            phase=_phase_name(self.phase),
+            current_player=self.current_player,
+            player=player,
+            team=team_of(player),
+            hand=[
                 {"card_id": card_id, "label": CARD_BY_ID[card_id].label}
                 for card_id in sorted(self.hands[player])
             ],
-            "hand_sizes": [len(self.hands[p]) for p in range(4)],
-            "top_combination": (
-                None if self.top_combination is None else combination_to_dict(self.top_combination)
+            hand_sizes=[len(self.hands[p]) for p in range(4)],
+            top_combination=(
+                None if self.top_combination is None else _combination_observation(self.top_combination)
             ),
-            "wish_rank": self.wish_rank,
-            "finish_order": list(self.finish_order),
-            "tichu_calls": {
+            wish_rank=self.wish_rank,
+            finish_order=list(self.finish_order),
+            tichu_calls={
                 player_id: value
                 for player_id, value in enumerate(self.tichu_calls)
                 if value is not None
             },
-            "public_history": list(self.public_history),
-            "round_scores": self.round_scores,
-        }
+            public_history=list(self.public_history),
+            round_scores=self.round_scores,
+        )
 
     def full_state(self) -> dict[str, Any]:
         return {

@@ -1,39 +1,45 @@
-from .actions import (
-    BombAction,
-    DeclareSmallTichu,
-    DragonGiftAction,
-    ExchangeAction,
-    GrandTichuDecision,
-    PassAction,
-    PlayAction,
-)
-from .cards import CARD_BY_ID, DECK, Card, Rank, Special, Suit
-from .combinations import Combination, CombinationKind, generate_combinations
-from .config import TichuRoundConfig
-from .round import Phase, TichuRound, partner_of, team_of
-from .match import TichuMatch
+from __future__ import annotations
 
-__all__ = [
-    "BombAction",
-    "CARD_BY_ID",
-    "Card",
-    "Combination",
-    "CombinationKind",
-    "DECK",
-    "DeclareSmallTichu",
-    "DragonGiftAction",
-    "ExchangeAction",
-    "GrandTichuDecision",
-    "PassAction",
-    "Phase",
-    "PlayAction",
-    "Rank",
-    "Special",
-    "Suit",
-    "TichuMatch",
-    "TichuRound",
-    "TichuRoundConfig",
-    "generate_combinations",
-    "partner_of",
-    "team_of",
-]
+from importlib import import_module
+from typing import Any
+
+
+_EXPORT_MODULES = {
+    "BombAction": ".actions",
+    "DeclareSmallTichu": ".actions",
+    "DragonGiftAction": ".actions",
+    "ExchangeAction": ".actions",
+    "GrandTichuDecision": ".actions",
+    "PassAction": ".actions",
+    "PlayAction": ".actions",
+    "CARD_BY_ID": ".cards",
+    "Card": ".cards",
+    "DECK": ".cards",
+    "Rank": ".cards",
+    "Special": ".cards",
+    "Suit": ".cards",
+    "Combination": ".combinations",
+    "CombinationKind": ".combinations",
+    "generate_combinations": ".combinations",
+    "TichuRoundConfig": ".config",
+    "RoundObservation": ".observations",
+    "Phase": ".round",
+    "TichuRound": ".round",
+    "partner_of": ".round",
+    "team_of": ".round",
+    "TichuMatch": ".match",
+}
+
+__all__ = tuple(_EXPORT_MODULES)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORT_MODULES[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

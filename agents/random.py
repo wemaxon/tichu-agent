@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 
 from tichu.actions import (
     Action,
@@ -10,7 +11,7 @@ from tichu.actions import (
     GrandTichuDecision,
     PlayAction,
 )
-from tichu.round import Phase, TichuRound
+from tichu.observations import RoundObservation
 
 
 class RandomAgent:
@@ -29,30 +30,36 @@ class RandomAgent:
         self.call_small_probability = call_small_probability
         self.bomb_probability = bomb_probability
 
-    def choose_action(self, round_: TichuRound) -> Action:
-        player = round_.current_player
+    def choose_action(
+        self,
+        observation: RoundObservation,
+        legal_actions: Sequence[Action],
+    ) -> Action:
+        player = observation["current_player"]
         if player is None:
             raise RuntimeError("No action is available")
-
-        if round_.phase is Phase.GRAND_TICHU:
-            return GrandTichuDecision(self.rng.random() < self.call_grand_probability)
-
-        if round_.phase is Phase.EXCHANGE:
-            recipients = [other for other in range(4) if other != player]
-            selected = self.rng.sample(round_.hands[player], 3)
-            return ExchangeAction(tuple(sorted(zip(recipients, selected))))
-
-        actions = list(round_.legal_actions())
+        actions = list(legal_actions)
         if not actions:
             raise RuntimeError("The simulator produced no legal actions")
 
-        if round_.phase is Phase.BOMB_WINDOW:
+        phase = observation["phase"]
+
+        if phase == "grand_tichu":
+            return GrandTichuDecision(self.rng.random() < self.call_grand_probability)
+
+        if phase == "exchange":
+            recipients = [other for other in range(4) if other != player]
+            hand = [card["card_id"] for card in observation["hand"]]
+            selected = self.rng.sample(hand, 3)
+            return ExchangeAction(tuple(sorted(zip(recipients, selected))))
+
+        if phase == "bomb_window":
             bombs = [action for action in actions if isinstance(action, BombAction) and action.combination]
             if bombs and self.rng.random() < self.bomb_probability:
                 return self.rng.choice(bombs)
             return BombAction(None)
 
-        if round_.phase is Phase.PLAY:
+        if phase == "play":
             declarations = [action for action in actions if isinstance(action, DeclareSmallTichu)]
             if declarations and self.rng.random() < self.call_small_probability:
                 return declarations[0]
