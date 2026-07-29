@@ -35,6 +35,50 @@ class Special(str, Enum):
     DRAGON = "dragon"
 
 
+RANK_ORDER: tuple[Rank, ...] = (
+    Rank.TEN,
+    Rank.TWO,
+    Rank.THREE,
+    Rank.FOUR,
+    Rank.FIVE,
+    Rank.SIX,
+    Rank.SEVEN,
+    Rank.EIGHT,
+    Rank.NINE,
+    Rank.ACE,
+    Rank.JACK,
+    Rank.KING,
+    Rank.QUEEN,
+)
+
+CARD_ID_LAYOUT: tuple[Suit | Special, ...] = (
+    Suit.SWORD,
+    Suit.PAGODA,
+    Special.DOG,
+    Special.DRAGON,
+    Suit.JADE,
+    Special.MAHJONG,
+    Special.PHOENIX,
+    Suit.STAR,
+)
+
+_RANK_LABELS: dict[int, str] = {
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+    10: "10",
+    11: "jack",
+    12: "queen",
+    13: "king",
+    14: "ace",
+}
+
+
 @dataclass(frozen=True, order=True)
 class Card:
     """One physical card from a Tichu deck.
@@ -75,10 +119,8 @@ class Card:
     @property
     def label(self) -> str:
         if self.special is not None:
-            return self.special.value.upper()
-        rank_labels = {11: "J", 12: "Q", 13: "K", 14: "A"}
-        rank = self.normal_rank
-        return f"{rank_labels.get(rank, rank)}-{self.normal_suit.value}"
+            return self.special.value
+        return f"{_RANK_LABELS[self.normal_rank]}-{self.normal_suit.value}"
 
     @property
     def points(self) -> int:
@@ -95,19 +137,18 @@ class Card:
 
 def build_deck() -> tuple[Card, ...]:
     cards: list[Card] = []
-    card_id = 0
-    for suit in Suit:
-        for rank in range(2, 15):
-            cards.append(Card(card_id=card_id, suit=suit, rank=rank))
-            card_id += 1
-    for special in (Special.MAHJONG, Special.DOG, Special.PHOENIX, Special.DRAGON):
-        cards.append(Card(card_id=card_id, special=special))
-        card_id += 1
+    for item in CARD_ID_LAYOUT:
+        if isinstance(item, Suit):
+            for rank in RANK_ORDER:
+                cards.append(Card(card_id=len(cards), suit=item, rank=rank))
+        else:
+            cards.append(Card(card_id=len(cards), special=item))
     return tuple(cards)
 
 
 DECK: tuple[Card, ...] = build_deck()
 CARD_BY_ID: dict[int, Card] = {card.card_id: card for card in DECK}
+CARD_CLASS_NAMES: tuple[str, ...] = tuple(card.label for card in DECK)
 
 
 def cards_from_ids(card_ids: Iterable[int]) -> tuple[Card, ...]:

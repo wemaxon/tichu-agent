@@ -13,6 +13,7 @@ _EXPORT_MODULES = {
     "PassAction": ".actions",
     "PlayAction": ".actions",
     "CARD_BY_ID": ".cards",
+    "CARD_CLASS_NAMES": ".cards",
     "Card": ".cards",
     "DECK": ".cards",
     "Rank": ".cards",
