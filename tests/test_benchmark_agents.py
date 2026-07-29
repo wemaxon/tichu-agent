@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 
 from scripts.benchmark_agents import (
+    ProgressBar,
     run_benchmark,
     write_csv_rounds,
     write_json_result,
@@ -69,3 +71,34 @@ def test_benchmark_writes_json_and_csv(tmp_path) -> None:
     assert len(rows) == 2
     assert rows[0]["lineup"] == "greedy random greedy random"
     assert rows[1]["lineup"] == "random greedy random greedy"
+
+
+def test_benchmark_reports_progress_after_each_round() -> None:
+    updates: list[tuple[int, int]] = []
+
+    run_benchmark(
+        agent_a="greedy",
+        agent_b="random",
+        round_pairs=1,
+        seed=2,
+        dealer=0,
+        config=_fast_config(),
+        progress=lambda completed, total: updates.append((completed, total)),
+    )
+
+    assert updates == [(1, 2), (2, 2)]
+
+
+def test_progress_bar_renders_to_stream() -> None:
+    stream = io.StringIO()
+    progress_bar = ProgressBar(4, stream=stream, width=10)
+
+    progress_bar.update(1, 4)
+    progress_bar.update(4, 4)
+    progress_bar.close()
+
+    output = stream.getvalue()
+    assert "Benchmark progress" in output
+    assert "1/4" in output
+    assert "4/4" in output
+    assert output.endswith("\n")

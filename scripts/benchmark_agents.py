@@ -6,9 +6,10 @@ import json
 import statistics
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,6 +21,41 @@ from tichu.round import team_of
 
 
 AgentLineup = tuple[str, str, str, str]
+ProgressCallback = Callable[[int, int], None]
+
+
+class ProgressBar:
+    def __init__(self, total: int, *, stream: TextIO = sys.stderr, width: int = 30) -> None:
+        if total < 1:
+            raise ValueError("total must be at least 1")
+        if width < 1:
+            raise ValueError("width must be at least 1")
+        self.total = total
+        self.stream = stream
+        self.width = width
+        self._last_line = ""
+        self._rendered = False
+
+    def update(self, completed: int, total: int | None = None) -> None:
+        total = self.total if total is None else total
+        total = max(total, 1)
+        completed = min(max(completed, 0), total)
+
+        filled = round(self.width * completed / total)
+        bar = "#" * filled + "-" * (self.width - filled)
+        percent = 100.0 * completed / total
+        line = f"Benchmark progress [{bar}] {completed}/{total} {percent:5.1f}%"
+        padding = " " * max(0, len(self._last_line) - len(line))
+
+        self.stream.write(f"\r{line}{padding}")
+        self.stream.flush()
+        self._last_line = line
+        self._rendered = True
+
+    def close(self) -> None:
+        if self._rendered:
+            self.stream.write("\n")
+            self.stream.flush()
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,12 +221,14 @@ def run_benchmark(
     seed: int,
     dealer: int,
     config: TichuRoundConfig,
+    progress: ProgressCallback | None = None,
 ) -> BenchmarkResult:
     if round_pairs < 1:
         raise ValueError("round_pairs must be at least 1")
 
     started = time.perf_counter()
     rounds: list[PlayedRound] = []
+    total_rounds = round_pairs * 2
     for pair_index in range(round_pairs):
         round_seed = seed + pair_index
         round_dealer = (dealer + pair_index) % 4
@@ -204,6 +242,8 @@ def run_benchmark(
                 config=config,
             )
         )
+        if progress is not None:
+            progress(len(rounds), total_rounds)
         rounds.append(
             _play_benchmark_round(
                 index=len(rounds),
@@ -214,6 +254,8 @@ def run_benchmark(
                 config=config,
             )
         )
+        if progress is not None:
+            progress(len(rounds), total_rounds)
 
     return BenchmarkResult(
         agent_a=agent_a,
@@ -342,6 +384,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dealer", type=int, choices=range(4), default=0)
     parser.add_argument("--json", type=str, help="Write summary and per-round results as JSON")
     parser.add_argument("--csv", type=str, help="Write per-round results as CSV")
+    parser.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="Show a progress bar on stderr; auto enables it for interactive terminals",
+    )
     add_round_config_args(parser)
     return parser
 
@@ -349,14 +397,27 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    result = run_benchmark(
-        agent_a=args.agent_a,
-        agent_b=args.agent_b,
-        round_pairs=args.round_pairs,
-        seed=args.seed,
-        dealer=args.dealer,
-        config=round_config_from_args(args),
-    )
+    if args.round_pairs < 1:
+        parser.error("--round-pairs must be at least 1")
+
+    progress_bar = None
+    if args.progress == "always" or (args.progress == "auto" and sys.stderr.isatty()):
+        progress_bar = ProgressBar(args.round_pairs * 2)
+
+    try:
+        result = run_benchmark(
+            agent_a=args.agent_a,
+            agent_b=args.agent_b,
+            round_pairs=args.round_pairs,
+            seed=args.seed,
+            dealer=args.dealer,
+            config=round_config_from_args(args),
+            progress=progress_bar.update if progress_bar is not None else None,
+        )
+    finally:
+        if progress_bar is not None:
+            progress_bar.close()
+
     print_summary(result)
     if args.json:
         write_json_result(result, args.json)
