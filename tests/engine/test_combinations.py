@@ -3,7 +3,14 @@ from __future__ import annotations
 import pytest
 
 from tichu.cards import Special, Suit
-from tichu.combinations import CombinationKind, resolve_for_context
+from tichu.combinations import (
+    Combination,
+    CombinationKind,
+    generate_bombs,
+    generate_combinations,
+    generate_combinations_for_context,
+    resolve_for_context,
+)
 
 from tests.helpers import card_id, classify_ids, combo_of_kind, combos_of_kind, normal_ids
 
@@ -167,3 +174,154 @@ def test_disabled_bombs_are_generated_as_non_bomb_straights_only() -> None:
     combos = classify_ids(*straight_flush, allow_bombs=False)
     assert not any(combo.is_bomb for combo in combos)
     assert any(combo.kind is CombinationKind.STRAIGHT for combo in combos)
+
+
+def test_bomb_generator_matches_exhaustive_bomb_filter() -> None:
+    hand = (
+        *normal_ids(9),
+        *(card_id(rank, Suit.JADE) for rank in range(3, 9)),
+        card_id(special=Special.PHOENIX),
+    )
+
+    expected = tuple(
+        combo
+        for combo in generate_combinations(tuple(sorted(hand)), allow_bombs=True)
+        if combo.is_bomb
+    )
+
+    assert generate_bombs(tuple(sorted(hand))) == expected
+
+
+@pytest.mark.parametrize(
+    "top",
+    [
+        combo_of_kind((card_id(5, Suit.PAGODA),), CombinationKind.SINGLE),
+        combo_of_kind((card_id(2, Suit.PAGODA), card_id(2, Suit.STAR)), CombinationKind.PAIR),
+        combo_of_kind(
+            (card_id(2, Suit.PAGODA), card_id(2, Suit.STAR), card_id(2, Suit.SWORD)),
+            CombinationKind.TRIPLE,
+        ),
+        combo_of_kind(
+            (
+                card_id(2, Suit.PAGODA),
+                card_id(2, Suit.STAR),
+                card_id(2, Suit.SWORD),
+                card_id(3, Suit.PAGODA),
+                card_id(3, Suit.STAR),
+            ),
+            CombinationKind.FULL_HOUSE,
+        ),
+        combo_of_kind(
+            (
+                card_id(2, Suit.PAGODA),
+                card_id(2, Suit.STAR),
+                card_id(3, Suit.PAGODA),
+                card_id(3, Suit.STAR),
+            ),
+            CombinationKind.PAIR_SEQUENCE,
+        ),
+        combo_of_kind(
+            (
+                card_id(2, Suit.PAGODA),
+                card_id(3, Suit.STAR),
+                card_id(4, Suit.SWORD),
+                card_id(5, Suit.PAGODA),
+                card_id(6, Suit.STAR),
+            ),
+            CombinationKind.STRAIGHT,
+        ),
+        combo_of_kind(
+            tuple(card_id(rank, Suit.PAGODA) for rank in range(2, 7)),
+            CombinationKind.STRAIGHT_FLUSH_BOMB,
+        ),
+        combo_of_kind(
+            tuple(card_id(rank, Suit.PAGODA) for rank in range(3, 8)),
+            CombinationKind.STRAIGHT_FLUSH_BOMB,
+        ),
+        combo_of_kind((card_id(special=Special.DRAGON),), CombinationKind.SINGLE),
+    ],
+)
+def test_contextual_generator_matches_exhaustive_filter(top: Combination) -> None:
+    hand = (
+        card_id(special=Special.MAHJONG),
+        card_id(special=Special.PHOENIX),
+        card_id(special=Special.DOG),
+        card_id(special=Special.DRAGON),
+        card_id(2, Suit.JADE),
+        card_id(2, Suit.SWORD),
+        card_id(3, Suit.JADE),
+        card_id(3, Suit.SWORD),
+        card_id(4, Suit.JADE),
+        card_id(5, Suit.JADE),
+        card_id(6, Suit.JADE),
+        card_id(7, Suit.JADE),
+        card_id(8, Suit.JADE),
+        card_id(9, Suit.JADE),
+    )
+
+    assert generate_combinations_for_context(hand, top, allow_bombs=True) == _exhaustive_context(
+        hand,
+        top,
+        allow_bombs=True,
+    )
+
+
+def test_contextual_generator_treats_disabled_bombs_as_regular_straights() -> None:
+    hand = tuple(card_id(rank, Suit.JADE) for rank in range(5, 10))
+    top = combo_of_kind(
+        tuple(card_id(rank, Suit.PAGODA) for rank in range(4, 9)),
+        CombinationKind.STRAIGHT,
+        allow_bombs=False,
+    )
+
+    generated = generate_combinations_for_context(hand, top, allow_bombs=False)
+
+    assert generated == _exhaustive_context(hand, top, allow_bombs=False)
+    assert any(combo.kind is CombinationKind.STRAIGHT for combo in generated)
+    assert not any(combo.is_bomb for combo in generated)
+
+
+def test_contextual_bombs_only_generator_matches_exhaustive_filter() -> None:
+    hand = (
+        *normal_ids(9),
+        *(card_id(rank, Suit.JADE) for rank in range(3, 9)),
+    )
+    top = combo_of_kind(normal_ids(8), CombinationKind.FOUR_BOMB)
+
+    generated = generate_combinations_for_context(
+        tuple(sorted(hand)),
+        top,
+        allow_bombs=True,
+        bombs_only=True,
+    )
+
+    assert generated == _exhaustive_context(
+        hand,
+        top,
+        allow_bombs=True,
+        bombs_only=True,
+    )
+    assert all(combo.is_bomb for combo in generated)
+
+
+def _exhaustive_context(
+    hand_ids: tuple[int, ...],
+    top: Combination | None,
+    *,
+    allow_bombs: bool,
+    bombs_only: bool = False,
+) -> tuple[Combination, ...]:
+    results: set[Combination] = set()
+    for combo in generate_combinations(tuple(sorted(hand_ids)), allow_bombs):
+        if bombs_only and not combo.is_bomb:
+            continue
+        if top is None:
+            results.add(combo)
+            continue
+        try:
+            resolved = resolve_for_context(combo, top)
+        except ValueError:
+            continue
+        if resolved.beats(top):
+            results.add(resolved)
+    return tuple(sorted(results, key=Combination.sort_key))

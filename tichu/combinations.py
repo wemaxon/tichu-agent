@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import lru_cache
 from itertools import combinations as choose
-from collections import Counter
 
-from .cards import CARD_BY_ID, Card, Special
+from .cards import CARD_BY_ID, Card, Special, Suit
 
 
 class CombinationKind(str, Enum):
@@ -308,6 +308,93 @@ def generate_combinations(
     return tuple(sorted(results, key=Combination.sort_key))
 
 
+@lru_cache(maxsize=8192)
+def generate_bombs(
+    hand_ids: tuple[int, ...],
+) -> tuple[Combination, ...]:
+    """Generate only bomb combinations contained in a hand."""
+
+    hand_ids = tuple(sorted(hand_ids))
+    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
+    normal_cards = tuple(card for card in cards if card.is_normal)
+    by_rank: dict[int, list[Card]] = {}
+    by_suit: dict[Suit, dict[int, Card]] = {}
+    results: set[Combination] = set()
+
+    for card in normal_cards:
+        by_rank.setdefault(card.normal_rank, []).append(card)
+        by_suit.setdefault(card.normal_suit, {})[card.normal_rank] = card
+
+    for rank, rank_cards in by_rank.items():
+        if len(rank_cards) == 4:
+            results.add(_combo(tuple(rank_cards), CombinationKind.FOUR_BOMB, float(rank)))
+
+    for rank_cards in by_suit.values():
+        for run in _consecutive_runs(sorted(rank_cards)):
+            if len(run) < 5:
+                continue
+            for start in range(0, len(run) - 4):
+                for stop in range(start + 5, len(run) + 1):
+                    ranks = run[start:stop]
+                    cards_in_run = tuple(rank_cards[rank] for rank in ranks)
+                    results.add(
+                        _combo(
+                            cards_in_run,
+                            CombinationKind.STRAIGHT_FLUSH_BOMB,
+                            float(ranks[-1]),
+                        )
+                    )
+
+    return tuple(sorted(results, key=Combination.sort_key))
+
+
+@lru_cache(maxsize=8192)
+def generate_combinations_for_context(
+    hand_ids: tuple[int, ...],
+    top: Combination | None,
+    allow_bombs: bool = True,
+    bombs_only: bool = False,
+) -> tuple[Combination, ...]:
+    """Generate combinations relevant to the current trick context.
+
+    With no top combination, every legal lead is relevant. With a top
+    combination, only same-shape responses and stronger bombs can be legal, so
+    the generator avoids classifying unrelated hand subsets.
+    """
+
+    hand_ids = tuple(sorted(hand_ids))
+    if top is None:
+        if bombs_only:
+            return generate_bombs(hand_ids) if allow_bombs else ()
+        return generate_combinations(hand_ids, allow_bombs)
+
+    if top.is_dog:
+        return ()
+
+    if top.is_bomb or bombs_only:
+        if not allow_bombs:
+            return ()
+        return tuple(combo for combo in generate_bombs(hand_ids) if combo.beats(top))
+
+    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
+    results: set[Combination] = set()
+    for subset in _candidate_subsets_for_shape(cards, top.kind, top.length):
+        for combo in classify_all(subset, allow_bombs=allow_bombs):
+            if combo.is_bomb:
+                continue
+            try:
+                resolved = resolve_for_context(combo, top)
+            except ValueError:
+                continue
+            if resolved.beats(top):
+                results.add(resolved)
+
+    if allow_bombs:
+        results.update(combo for combo in generate_bombs(hand_ids) if combo.beats(top))
+
+    return tuple(sorted(results, key=Combination.sort_key))
+
+
 def resolve_for_context(combo: Combination, top: Combination | None) -> Combination:
     """Resolve the contextual value of a Phoenix played as a single."""
 
@@ -323,3 +410,51 @@ def resolve_for_context(combo: Combination, top: Combination | None) -> Combinat
     if top.contains_special(Special.DRAGON):
         raise ValueError("The Phoenix cannot beat the Dragon")
     return replace(combo, primary_rank=min(14.5, top.primary_rank + 0.5))
+
+
+def _candidate_subsets_for_shape(
+    cards: tuple[Card, ...],
+    kind: CombinationKind,
+    length: int,
+) -> tuple[tuple[Card, ...], ...]:
+    if kind is CombinationKind.DOG:
+        return ()
+    if kind is CombinationKind.SINGLE:
+        candidates = cards
+    elif kind in {
+        CombinationKind.PAIR,
+        CombinationKind.TRIPLE,
+        CombinationKind.FULL_HOUSE,
+        CombinationKind.PAIR_SEQUENCE,
+    }:
+        candidates = tuple(
+            card
+            for card in cards
+            if card.special is None or card.special is Special.PHOENIX
+        )
+    elif kind is CombinationKind.STRAIGHT:
+        candidates = tuple(
+            card
+            for card in cards
+            if card.special in (None, Special.MAHJONG, Special.PHOENIX)
+        )
+    else:
+        return ()
+
+    if length < 1 or len(candidates) < length:
+        return ()
+    return tuple(choose(candidates, length))
+
+
+def _consecutive_runs(ranks: list[int]) -> tuple[tuple[int, ...], ...]:
+    if not ranks:
+        return ()
+
+    runs: list[tuple[int, ...]] = []
+    start = 0
+    for index in range(1, len(ranks)):
+        if ranks[index] != ranks[index - 1] + 1:
+            runs.append(tuple(ranks[start:index]))
+            start = index
+    runs.append(tuple(ranks[start:]))
+    return tuple(runs)

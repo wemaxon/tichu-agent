@@ -27,7 +27,7 @@ from .combinations import (
     Combination,
     CombinationKind,
     generate_combinations,
-    resolve_for_context,
+    generate_combinations_for_context,
 )
 from .observations import (
     BombCloseBehaviorName,
@@ -415,18 +415,10 @@ class TichuRound:
             actions.append(DeclareSmallTichu())
 
         candidate_plays: list[PlayAction] = []
-        for raw_combo in self._combinations_in_hand(player):
-            if raw_combo.is_dog:
+        for combo in self._combinations_for_current_context(player):
+            if combo.is_dog:
                 if self.top_combination is None:
-                    candidate_plays.append(PlayAction(raw_combo))
-                continue
-
-            try:
-                combo = resolve_for_context(raw_combo, self.top_combination)
-            except ValueError:
-                continue
-
-            if self.top_combination is not None and not combo.beats(self.top_combination):
+                    candidate_plays.append(PlayAction(combo))
                 continue
 
             if combo.contains_special(Special.MAHJONG):
@@ -902,13 +894,21 @@ class TichuRound:
     def _combinations_in_hand(self, player: int) -> tuple[Combination, ...]:
         return generate_combinations(self.hands[player], self.config.bombs)
 
+    def _combinations_for_current_context(self, player: int) -> tuple[Combination, ...]:
+        return generate_combinations_for_context(
+            self.hands[player],
+            self.top_combination,
+            self.config.bombs,
+        )
+
     def _legal_bombs(self, player: int) -> tuple[Combination, ...]:
         if not self.config.out_of_turn_bombs or self.top_combination is None:
             return ()
-        return tuple(
-            combo
-            for combo in self._combinations_in_hand(player)
-            if combo.is_bomb and combo.beats(self.top_combination)
+        return generate_combinations_for_context(
+            self.hands[player],
+            self.top_combination,
+            self.config.bombs,
+            bombs_only=True,
         )
 
     def _passes_needed(self) -> int:
