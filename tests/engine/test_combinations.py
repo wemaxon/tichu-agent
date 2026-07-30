@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import random
+from functools import lru_cache
+from itertools import combinations as choose
+
 import pytest
 
-from tichu.cards import Special, Suit
+from tichu.cards import CARD_BY_ID, DECK, Special, Suit
 from tichu.combinations import (
     Combination,
     CombinationKind,
+    classify_all,
     generate_bombs,
     generate_combinations,
     generate_combinations_for_context,
@@ -185,11 +190,44 @@ def test_bomb_generator_matches_exhaustive_bomb_filter() -> None:
 
     expected = tuple(
         combo
-        for combo in generate_combinations(tuple(sorted(hand)), allow_bombs=True)
+        for combo in _exhaustive_combinations(tuple(sorted(hand)), True)
         if combo.is_bomb
     )
 
     assert generate_bombs(tuple(sorted(hand))) == expected
+
+
+@pytest.mark.parametrize("allow_bombs", (False, True))
+def test_indexed_generator_matches_exhaustive_classifier(
+    allow_bombs: bool,
+) -> None:
+    rng = random.Random(20260731)
+    phoenix = card_id(special=Special.PHOENIX)
+    mahjong = card_id(special=Special.MAHJONG)
+
+    for size in range(1, 15):
+        hands = [
+            tuple(sorted(card.card_id for card in rng.sample(DECK, size))),
+            _sample_hand_with_required_cards(
+                rng,
+                size,
+                required=(phoenix,),
+            ),
+        ]
+        if size >= 2:
+            hands.append(
+                _sample_hand_with_required_cards(
+                    rng,
+                    size,
+                    required=(mahjong, phoenix),
+                )
+            )
+
+        for hand in hands:
+            assert generate_combinations(
+                hand,
+                allow_bombs,
+            ) == _exhaustive_combinations(hand, allow_bombs)
 
 
 @pytest.mark.parametrize(
@@ -312,7 +350,7 @@ def _exhaustive_context(
     bombs_only: bool = False,
 ) -> tuple[Combination, ...]:
     results: set[Combination] = set()
-    for combo in generate_combinations(tuple(sorted(hand_ids)), allow_bombs):
+    for combo in _exhaustive_combinations(tuple(sorted(hand_ids)), allow_bombs):
         if bombs_only and not combo.is_bomb:
             continue
         if top is None:
@@ -325,3 +363,40 @@ def _exhaustive_context(
         if resolved.beats(top):
             results.add(resolved)
     return tuple(sorted(results, key=Combination.sort_key))
+
+
+@lru_cache(maxsize=None)
+def _exhaustive_combinations(
+    hand_ids: tuple[int, ...],
+    allow_bombs: bool,
+) -> tuple[Combination, ...]:
+    cards = tuple(CARD_BY_ID[card_id_] for card_id_ in hand_ids)
+    results: set[Combination] = set()
+    for size in range(1, len(cards) + 1):
+        for subset in choose(cards, size):
+            results.update(
+                classify_all(
+                    subset,
+                    allow_bombs=allow_bombs,
+                )
+            )
+    return tuple(sorted(results, key=Combination.sort_key))
+
+
+def _sample_hand_with_required_cards(
+    rng: random.Random,
+    size: int,
+    *,
+    required: tuple[int, ...],
+) -> tuple[int, ...]:
+    required_set = set(required)
+    available = [
+        card.card_id
+        for card in DECK
+        if card.card_id not in required_set
+    ]
+    return tuple(
+        sorted(
+            (*required, *rng.sample(available, size - len(required)))
+        )
+    )

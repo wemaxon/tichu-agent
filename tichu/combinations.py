@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import lru_cache
-from itertools import combinations as choose
+from itertools import combinations as choose, product
 
 from .cards import CARD_BY_ID, Card, Special, Suit
 
@@ -293,18 +294,21 @@ def generate_combinations(
 ) -> tuple[Combination, ...]:
     """Generate all legal combinations contained in a hand.
 
-    A 14-card hand has only 16,383 non-empty subsets. Exhaustive subset
-    classification keeps the rules implementation easy to audit and is fast
-    enough for a correctness-first simulator. A future RL rollout engine can
-    replace this with indexed generators without changing the public API.
+    The hand is indexed once by rank and suit. Each combination family then
+    enumerates only card selections that can satisfy that family's structure.
+    This keeps generation proportional to the number of plausible plays
+    instead of the number of arbitrary hand subsets.
     """
 
-    hand_ids = tuple(sorted(hand_ids))
-    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
-    results: set[Combination] = set()
-    for size in range(1, len(cards) + 1):
-        for subset in choose(cards, size):
-            results.update(classify_all(subset, allow_bombs=allow_bombs))
+    hand = _index_hand(tuple(sorted(hand_ids)))
+    results = set(_generate_singles(hand))
+    results.update(_generate_pairs(hand))
+    results.update(_generate_triples(hand))
+    results.update(_generate_full_houses(hand))
+    results.update(_generate_pair_sequences(hand))
+    results.update(_generate_straights(hand, allow_bombs=allow_bombs))
+    if allow_bombs:
+        results.update(_generate_bombs(hand))
     return tuple(sorted(results, key=Combination.sort_key))
 
 
@@ -314,38 +318,8 @@ def generate_bombs(
 ) -> tuple[Combination, ...]:
     """Generate only bomb combinations contained in a hand."""
 
-    hand_ids = tuple(sorted(hand_ids))
-    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
-    normal_cards = tuple(card for card in cards if card.is_normal)
-    by_rank: dict[int, list[Card]] = {}
-    by_suit: dict[Suit, dict[int, Card]] = {}
-    results: set[Combination] = set()
-
-    for card in normal_cards:
-        by_rank.setdefault(card.normal_rank, []).append(card)
-        by_suit.setdefault(card.normal_suit, {})[card.normal_rank] = card
-
-    for rank, rank_cards in by_rank.items():
-        if len(rank_cards) == 4:
-            results.add(_combo(tuple(rank_cards), CombinationKind.FOUR_BOMB, float(rank)))
-
-    for rank_cards in by_suit.values():
-        for run in _consecutive_runs(sorted(rank_cards)):
-            if len(run) < 5:
-                continue
-            for start in range(0, len(run) - 4):
-                for stop in range(start + 5, len(run) + 1):
-                    ranks = run[start:stop]
-                    cards_in_run = tuple(rank_cards[rank] for rank in ranks)
-                    results.add(
-                        _combo(
-                            cards_in_run,
-                            CombinationKind.STRAIGHT_FLUSH_BOMB,
-                            float(ranks[-1]),
-                        )
-                    )
-
-    return tuple(sorted(results, key=Combination.sort_key))
+    hand = _index_hand(tuple(sorted(hand_ids)))
+    return tuple(sorted(_generate_bombs(hand), key=Combination.sort_key))
 
 
 @lru_cache(maxsize=8192)
@@ -376,21 +350,27 @@ def generate_combinations_for_context(
             return ()
         return tuple(combo for combo in generate_bombs(hand_ids) if combo.beats(top))
 
-    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
+    hand = _index_hand(hand_ids)
     results: set[Combination] = set()
-    for subset in _candidate_subsets_for_shape(cards, top.kind, top.length):
-        for combo in classify_all(subset, allow_bombs=allow_bombs):
-            if combo.is_bomb:
-                continue
-            try:
-                resolved = resolve_for_context(combo, top)
-            except ValueError:
-                continue
-            if resolved.beats(top):
-                results.add(resolved)
+    for combo in _generate_kind(
+        hand,
+        top.kind,
+        length=top.length,
+        allow_bombs=allow_bombs,
+    ):
+        try:
+            resolved = resolve_for_context(combo, top)
+        except ValueError:
+            continue
+        if resolved.beats(top):
+            results.add(resolved)
 
     if allow_bombs:
-        results.update(combo for combo in generate_bombs(hand_ids) if combo.beats(top))
+        results.update(
+            combo
+            for combo in generate_bombs(hand_ids)
+            if combo.beats(top)
+        )
 
     return tuple(sorted(results, key=Combination.sort_key))
 
@@ -412,38 +392,309 @@ def resolve_for_context(combo: Combination, top: Combination | None) -> Combinat
     return replace(combo, primary_rank=min(14.5, top.primary_rank + 0.5))
 
 
-def _candidate_subsets_for_shape(
-    cards: tuple[Card, ...],
-    kind: CombinationKind,
-    length: int,
-) -> tuple[tuple[Card, ...], ...]:
-    if kind is CombinationKind.DOG:
-        return ()
-    if kind is CombinationKind.SINGLE:
-        candidates = cards
-    elif kind in {
-        CombinationKind.PAIR,
-        CombinationKind.TRIPLE,
-        CombinationKind.FULL_HOUSE,
-        CombinationKind.PAIR_SEQUENCE,
-    }:
-        candidates = tuple(
-            card
-            for card in cards
-            if card.special is None or card.special is Special.PHOENIX
-        )
-    elif kind is CombinationKind.STRAIGHT:
-        candidates = tuple(
-            card
-            for card in cards
-            if card.special in (None, Special.MAHJONG, Special.PHOENIX)
-        )
-    else:
-        return ()
+@dataclass(frozen=True, slots=True)
+class _HandIndex:
+    cards: tuple[Card, ...]
+    normal_by_rank: tuple[tuple[Card, ...], ...]
+    normal_by_suit: tuple[tuple[Card, ...], ...]
+    mahjong: Card | None
+    phoenix: Card | None
 
-    if length < 1 or len(candidates) < length:
-        return ()
-    return tuple(choose(candidates, length))
+
+@lru_cache(maxsize=8192)
+def _index_hand(hand_ids: tuple[int, ...]) -> _HandIndex:
+    cards = tuple(CARD_BY_ID[card_id] for card_id in hand_ids)
+    cards_by_rank: list[list[Card]] = [[] for _ in range(15)]
+    cards_by_suit: dict[Suit, list[Card]] = {suit: [] for suit in Suit}
+    mahjong: Card | None = None
+    phoenix: Card | None = None
+    for card in cards:
+        if card.is_normal:
+            cards_by_rank[card.normal_rank].append(card)
+            cards_by_suit[card.normal_suit].append(card)
+        elif card.special is Special.MAHJONG:
+            mahjong = card
+        elif card.special is Special.PHOENIX:
+            phoenix = card
+
+    return _HandIndex(
+        cards=cards,
+        normal_by_rank=tuple(tuple(rank_cards) for rank_cards in cards_by_rank),
+        normal_by_suit=tuple(tuple(cards_by_suit[suit]) for suit in Suit),
+        mahjong=mahjong,
+        phoenix=phoenix,
+    )
+
+
+def _generate_kind(
+    hand: _HandIndex,
+    kind: CombinationKind,
+    *,
+    length: int,
+    allow_bombs: bool,
+) -> Iterator[Combination]:
+    if kind is CombinationKind.SINGLE:
+        yield from _generate_singles(hand)
+    elif kind is CombinationKind.PAIR:
+        yield from _generate_pairs(hand)
+    elif kind is CombinationKind.TRIPLE:
+        yield from _generate_triples(hand)
+    elif kind is CombinationKind.FULL_HOUSE:
+        yield from _generate_full_houses(hand)
+    elif kind is CombinationKind.PAIR_SEQUENCE:
+        if length >= 4 and length % 2 == 0:
+            yield from _generate_pair_sequences(
+                hand,
+                pair_count=length // 2,
+            )
+    elif kind is CombinationKind.STRAIGHT:
+        yield from _generate_straights(
+            hand,
+            length=length,
+            allow_bombs=allow_bombs,
+        )
+
+
+def _generate_singles(hand: _HandIndex) -> Iterator[Combination]:
+    for card in hand.cards:
+        if card.special is Special.DOG:
+            kind = CombinationKind.DOG
+            primary_rank = 0.0
+        elif card.special is Special.MAHJONG:
+            kind = CombinationKind.SINGLE
+            primary_rank = 1.0
+        elif card.special is Special.PHOENIX:
+            kind = CombinationKind.SINGLE
+            primary_rank = 1.5
+        elif card.special is Special.DRAGON:
+            kind = CombinationKind.SINGLE
+            primary_rank = 15.0
+        else:
+            kind = CombinationKind.SINGLE
+            primary_rank = float(card.normal_rank)
+        yield _combo((card,), kind, primary_rank)
+
+
+def _generate_pairs(hand: _HandIndex) -> Iterator[Combination]:
+    for rank in range(2, 15):
+        rank_cards = hand.normal_by_rank[rank]
+        for cards in choose(rank_cards, 2):
+            yield _combo(cards, CombinationKind.PAIR, float(rank))
+        if hand.phoenix is not None:
+            for card in rank_cards:
+                yield _combo(
+                    (card, hand.phoenix),
+                    CombinationKind.PAIR,
+                    float(rank),
+                    rank,
+                )
+
+
+def _generate_triples(hand: _HandIndex) -> Iterator[Combination]:
+    for rank in range(2, 15):
+        rank_cards = hand.normal_by_rank[rank]
+        for cards in choose(rank_cards, 3):
+            yield _combo(cards, CombinationKind.TRIPLE, float(rank))
+        if hand.phoenix is not None:
+            for pair in choose(rank_cards, 2):
+                yield _combo(
+                    (*pair, hand.phoenix),
+                    CombinationKind.TRIPLE,
+                    float(rank),
+                    rank,
+                )
+
+
+def _generate_full_houses(hand: _HandIndex) -> Iterator[Combination]:
+    for triple_rank in range(2, 15):
+        for pair_rank in range(2, 15):
+            if triple_rank == pair_rank:
+                continue
+
+            for cards in _rank_selection_products(
+                hand,
+                ((triple_rank, 3), (pair_rank, 2)),
+            ):
+                yield _combo(
+                    cards,
+                    CombinationKind.FULL_HOUSE,
+                    float(triple_rank),
+                )
+
+            if hand.phoenix is None:
+                continue
+
+            # Natural triple plus a Phoenix-completed pair.
+            for cards in _rank_selection_products(
+                hand,
+                ((triple_rank, 3), (pair_rank, 1)),
+            ):
+                yield _combo(
+                    (*cards, hand.phoenix),
+                    CombinationKind.FULL_HOUSE,
+                    float(triple_rank),
+                    pair_rank,
+                )
+
+            # Phoenix-completed triple plus a natural pair.
+            for cards in _rank_selection_products(
+                hand,
+                ((triple_rank, 2), (pair_rank, 2)),
+            ):
+                yield _combo(
+                    (*cards, hand.phoenix),
+                    CombinationKind.FULL_HOUSE,
+                    float(triple_rank),
+                    triple_rank,
+                )
+
+
+def _generate_pair_sequences(
+    hand: _HandIndex,
+    *,
+    pair_count: int | None = None,
+) -> Iterator[Combination]:
+    pair_counts = (
+        range(2, 14)
+        if pair_count is None
+        else (pair_count,)
+    )
+    for count in pair_counts:
+        if count < 2 or count > 13:
+            continue
+        for start in range(2, 16 - count):
+            ranks = tuple(range(start, start + count))
+            for cards in _rank_selection_products(
+                hand,
+                tuple((rank, 2) for rank in ranks),
+            ):
+                yield _combo(
+                    cards,
+                    CombinationKind.PAIR_SEQUENCE,
+                    float(ranks[-1]),
+                )
+
+            if hand.phoenix is None:
+                continue
+            for phoenix_rank in ranks:
+                requirements = tuple(
+                    (rank, 1 if rank == phoenix_rank else 2)
+                    for rank in ranks
+                )
+                for cards in _rank_selection_products(hand, requirements):
+                    yield _combo(
+                        (*cards, hand.phoenix),
+                        CombinationKind.PAIR_SEQUENCE,
+                        float(ranks[-1]),
+                        phoenix_rank,
+                    )
+
+
+def _generate_straights(
+    hand: _HandIndex,
+    *,
+    allow_bombs: bool,
+    length: int | None = None,
+) -> Iterator[Combination]:
+    lengths = range(5, 15) if length is None else (length,)
+    for card_count in lengths:
+        if card_count < 5 or card_count > 14:
+            continue
+        for start in range(1, 16 - card_count):
+            ranks = tuple(range(start, start + card_count))
+
+            for cards in _straight_card_products(hand, ranks):
+                is_straight_flush = all(card.is_normal for card in cards) and len(
+                    {card.normal_suit for card in cards}
+                ) == 1
+                if allow_bombs and is_straight_flush:
+                    continue
+                yield _combo(
+                    cards,
+                    CombinationKind.STRAIGHT,
+                    float(ranks[-1]),
+                )
+
+            if hand.phoenix is None:
+                continue
+            for phoenix_rank in ranks:
+                # Phoenix may impersonate normal ranks only, never Mahjong.
+                if phoenix_rank < 2:
+                    continue
+                explicit_ranks = tuple(
+                    rank for rank in ranks if rank != phoenix_rank
+                )
+                for cards in _straight_card_products(hand, explicit_ranks):
+                    yield _combo(
+                        (*cards, hand.phoenix),
+                        CombinationKind.STRAIGHT,
+                        float(ranks[-1]),
+                        phoenix_rank,
+                    )
+
+
+def _generate_bombs(hand: _HandIndex) -> Iterator[Combination]:
+    for rank in range(2, 15):
+        rank_cards = hand.normal_by_rank[rank]
+        if len(rank_cards) == 4:
+            yield _combo(
+                rank_cards,
+                CombinationKind.FOUR_BOMB,
+                float(rank),
+            )
+
+    for suit_cards in hand.normal_by_suit:
+        card_by_rank = {card.normal_rank: card for card in suit_cards}
+        for run in _consecutive_runs(sorted(card_by_rank)):
+            if len(run) < 5:
+                continue
+            for start in range(0, len(run) - 4):
+                for stop in range(start + 5, len(run) + 1):
+                    ranks = run[start:stop]
+                    yield _combo(
+                        tuple(card_by_rank[rank] for rank in ranks),
+                        CombinationKind.STRAIGHT_FLUSH_BOMB,
+                        float(ranks[-1]),
+                    )
+
+
+def _rank_selection_products(
+    hand: _HandIndex,
+    requirements: tuple[tuple[int, int], ...],
+) -> Iterator[tuple[Card, ...]]:
+    if any(
+        len(hand.normal_by_rank[rank]) < count
+        for rank, count in requirements
+    ):
+        return
+    pools = tuple(
+        tuple(choose(hand.normal_by_rank[rank], count))
+        for rank, count in requirements
+    )
+    for selections in product(*pools):
+        yield tuple(
+            card
+            for selection in selections
+            for card in selection
+        )
+
+
+def _straight_card_products(
+    hand: _HandIndex,
+    ranks: tuple[int, ...],
+) -> Iterator[tuple[Card, ...]]:
+    pools: list[tuple[Card, ...]] = []
+    for rank in ranks:
+        if rank == 1:
+            if hand.mahjong is None:
+                return
+            pools.append((hand.mahjong,))
+            continue
+        rank_cards = hand.normal_by_rank[rank]
+        if not rank_cards:
+            return
+        pools.append(rank_cards)
+    yield from product(*pools)
 
 
 def _consecutive_runs(ranks: list[int]) -> tuple[tuple[int, ...], ...]:
