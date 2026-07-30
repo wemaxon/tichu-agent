@@ -11,7 +11,7 @@ player = round_.current_player
 observation = round_.observation(player)
 legal_actions = round_.legal_actions()
 action = agent.choose_action(observation, legal_actions)
-round_ = round_.apply(action)
+round_ = round_.apply(action, legal_actions=legal_actions)
 ```
 
 #### Run a simulation with random agents
@@ -104,7 +104,7 @@ state = env.state()
 assert state.policy_observation.current_player == 0
 
 action_features = [candidate.features for candidate in state.encoded_actions]
-state = env.step(action_index=0)
+state = env.step(action_index=0, legal_actions=state.legal_actions)
 ```
 
 Relative seats are ordered as the observer, next seat, partner, and previous
@@ -132,8 +132,35 @@ policy-facing `TichuEnvState`.
 Benchmark two agents with paired rounds:
 
 ```bash
-python -m scripts.benchmark_agents --agent-a greedy --agent-b random --round-pairs 100 --json results.json --csv rounds.csv
+python -m scripts.benchmark_agents \
+  --agent-a greedy \
+  --agent-b random \
+  --round-pairs 100 \
+  --seed 100000 \
+  --json results.json \
+  --csv rounds.csv
 ```
 
 Each round pair uses the same seed and dealer twice, swapping which team uses
-agent A and agent B. This reduces seat and deal bias.
+agent A and agent B. This reduces seat and deal bias. The summary includes
+confidence intervals for average score difference and round win rate.
+
+## Training
+
+Train one shared actor-critic policy for one team against a fixed baseline:
+
+```bash
+python -m scripts.train_actor_critic \
+  --opponent greedy \
+  --rounds 1000 \
+  --checkpoint checkpoints/actor_critic.pt \
+  --eval-every 100 \
+  --eval-round-pairs 50 \
+  --eval-seed 1000000 \
+  --metrics-jsonl runs/actor_critic.jsonl \
+  --metrics-csv runs/actor_critic.csv
+```
+
+Training seeds come from `--seed`; held-out evaluation seeds come from
+`--eval-seed`. Keep them separate so evaluation is not measured on training
+deals.
