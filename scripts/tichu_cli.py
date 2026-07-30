@@ -120,16 +120,18 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--log", type=str)
     play.add_argument(
         "--agent",
-        choices=available_agent_names(),
+        metavar="AGENT",
         default="random",
-        help="Agent used for all players unless --agents is provided",
+        help=(
+            "Agent used for all players unless --agents is provided. "
+            "Use 'agents' to list names; ML checkpoints use actor_critic:/path/to/checkpoint.pt"
+        ),
     )
     play.add_argument(
         "--agents",
-        choices=available_agent_names(),
         nargs=4,
         metavar=("P0", "P1", "P2", "P3"),
-        help="Agents for players 0, 1, 2, and 3",
+        help="Agents or agent specs for players 0, 1, 2, and 3",
     )
     add_round_config_args(play)
     play.set_defaults(func=command_play)
@@ -141,16 +143,18 @@ def build_parser() -> argparse.ArgumentParser:
     console.add_argument("--log", type=str)
     console.add_argument(
         "--agent",
-        choices=available_agent_names(),
+        metavar="AGENT",
         default="random",
-        help="Agent used for every non-human player unless --agents is provided",
+        help=(
+            "Agent used for every non-human player unless --agents is provided. "
+            "ML checkpoints use actor_critic:/path/to/checkpoint.pt"
+        ),
     )
     console.add_argument(
         "--agents",
-        choices=available_agent_names(),
         nargs=3,
         metavar=("A0", "A1", "A2"),
-        help="Agents for the three non-human players in player order",
+        help="Agents or agent specs for the three non-human players in player order",
     )
     add_round_config_args(console)
     console.set_defaults(func=command_console)
@@ -167,7 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return 2
 
 
 if __name__ == "__main__":

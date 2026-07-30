@@ -1,3 +1,4 @@
+from .actor_critic import ActorCriticAgent, ActorCriticAgentState
 from .base import Agent, LegalActions
 from .greedy import GreedyAgent
 from .heuristic import HeuristicAgent
@@ -6,6 +7,8 @@ from .random import RandomAgent
 
 __all__ = [
     "Agent",
+    "ActorCriticAgent",
+    "ActorCriticAgentState",
     "GreedyAgent",
     "HeuristicAgent",
     "LegalActions",

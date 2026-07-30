@@ -20,3 +20,14 @@ def test_agents_do_not_import_round_state() -> None:
         capture_output=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_agents_do_not_import_torch() -> None:
+    code = "import sys; import agents; raise SystemExit(1 if 'torch' in sys.modules else 0)"
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", code],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

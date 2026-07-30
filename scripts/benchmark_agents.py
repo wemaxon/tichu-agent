@@ -372,8 +372,25 @@ def print_summary(result: BenchmarkResult) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Benchmark two Tichu agents with paired rounds")
-    parser.add_argument("--agent-a", choices=available_agent_names(), required=True)
-    parser.add_argument("--agent-b", choices=available_agent_names(), required=True)
+    available = ", ".join(available_agent_names())
+    parser.add_argument(
+        "--agent-a",
+        metavar="AGENT",
+        required=True,
+        help=(
+            f"First team agent. Available base names: {available}. "
+            "Use actor_critic:/path/to/checkpoint.pt for a trained ML policy."
+        ),
+    )
+    parser.add_argument(
+        "--agent-b",
+        metavar="AGENT",
+        required=True,
+        help=(
+            f"Second team agent. Available base names: {available}. "
+            "Use actor_critic:/path/to/checkpoint.pt for a trained ML policy."
+        ),
+    )
     parser.add_argument(
         "--round-pairs",
         type=int,
@@ -414,6 +431,9 @@ def main() -> int:
             config=round_config_from_args(args),
             progress=progress_bar.update if progress_bar is not None else None,
         )
+    except ValueError as exc:
+        parser.error(str(exc))
+        return 2
     finally:
         if progress_bar is not None:
             progress_bar.close()
