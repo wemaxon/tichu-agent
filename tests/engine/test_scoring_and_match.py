@@ -7,7 +7,7 @@ from tichu.combinations import CombinationKind
 from tichu.match import TichuMatch
 from tichu.round import Phase
 
-from .helpers import card_id, combo_of_kind, make_round
+from tests.helpers import card_id, combo_of_kind, make_round
 
 
 pytestmark = pytest.mark.scoring

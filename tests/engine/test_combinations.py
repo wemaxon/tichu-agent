@@ -5,7 +5,7 @@ import pytest
 from tichu.cards import Special, Suit
 from tichu.combinations import CombinationKind, resolve_for_context
 
-from .helpers import card_id, classify_ids, combo_of_kind, combos_of_kind, normal_ids
+from tests.helpers import card_id, classify_ids, combo_of_kind, combos_of_kind, normal_ids
 
 
 pytestmark = pytest.mark.rules

@@ -1,3 +1,5 @@
+"""Tests for the rule-based heuristic baseline."""
+
 from __future__ import annotations
 
 from agents import available_agent_names, create_agent

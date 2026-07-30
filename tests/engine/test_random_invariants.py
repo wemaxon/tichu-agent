@@ -1,3 +1,5 @@
+"""Randomized complete-round engine invariant tests."""
+
 from __future__ import annotations
 
 import json

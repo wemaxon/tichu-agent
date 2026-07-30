@@ -8,7 +8,7 @@ from tichu.combinations import CombinationKind
 from tichu.config import TichuRoundConfig
 from tichu.round import BombCloseBehavior, Phase
 
-from .helpers import card_id, combo_of_kind, make_round, normal_ids
+from tests.helpers import card_id, combo_of_kind, make_round, normal_ids
 
 
 pytestmark = pytest.mark.rules

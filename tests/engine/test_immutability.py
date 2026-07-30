@@ -1,3 +1,5 @@
+"""Tests for immutable engine transitions."""
+
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError

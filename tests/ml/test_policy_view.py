@@ -1,3 +1,5 @@
+"""Tests for actor-relative policy observations."""
+
 from __future__ import annotations
 
 from dataclasses import replace

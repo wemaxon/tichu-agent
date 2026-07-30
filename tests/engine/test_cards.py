@@ -1,3 +1,5 @@
+"""Tests for the canonical Tichu deck and card model."""
+
 from __future__ import annotations
 
 from tichu.cards import CARD_BY_ID, CARD_CLASS_NAMES, DECK, Special, Suit, deck_points

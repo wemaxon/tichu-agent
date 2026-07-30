@@ -12,7 +12,7 @@ from tichu.actions import PassAction
 from tichu.config import TichuRoundConfig
 from tichu.round import Phase
 
-from .helpers import make_round
+from tests.helpers import make_round
 
 
 def _fast_config() -> TichuRoundConfig:

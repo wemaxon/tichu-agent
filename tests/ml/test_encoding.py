@@ -36,7 +36,7 @@ from tichu.cards import Special
 from tichu.combinations import CombinationKind
 from tichu.round import TichuRound
 
-from .helpers import card_id, combo_of_kind, normal_ids
+from tests.helpers import card_id, combo_of_kind, normal_ids
 
 
 def test_card_mask_uses_canonical_card_ids() -> None:

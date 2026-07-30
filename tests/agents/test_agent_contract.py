@@ -1,3 +1,5 @@
+"""Tests for the public agent boundary."""
+
 from __future__ import annotations
 
 import subprocess

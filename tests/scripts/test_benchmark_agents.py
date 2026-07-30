@@ -1,3 +1,5 @@
+"""Tests for the paired agent benchmark CLI."""
+
 from __future__ import annotations
 
 import csv
