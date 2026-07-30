@@ -8,9 +8,9 @@ from ml import (
     TichuEnv,
     encode_env_state,
 )
-from tichu.actions import PassAction
+from tichu.actions import Action, PassAction
 from tichu.config import TichuRoundConfig
-from tichu.round import Phase
+from tichu.round import Phase, TichuRound
 
 from tests.helpers import make_round
 
@@ -56,6 +56,27 @@ def test_env_steps_by_legal_action_index() -> None:
     assert after.steps == 1
     assert env.steps == 1
     assert env.round != before_round
+
+
+def test_env_step_can_reuse_precomputed_legal_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = TichuEnv(config=_fast_config(), seed=0, dealer=0)
+    state = env.state()
+    calls = 0
+    original_legal_actions = TichuRound.legal_actions
+
+    def counted_legal_actions(self: TichuRound) -> tuple[Action, ...]:
+        nonlocal calls
+        calls += 1
+        return original_legal_actions(self)
+
+    monkeypatch.setattr(TichuRound, "legal_actions", counted_legal_actions)
+
+    next_state = env.step(0, legal_actions=state.legal_actions)
+
+    assert next_state.steps == 1
+    assert calls == 1
 
 
 def test_env_rejects_invalid_index_and_illegal_action() -> None:

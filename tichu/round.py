@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import permutations
@@ -106,11 +107,11 @@ def _deck_for_config(config: TichuRoundConfig) -> tuple[int, ...]:
 
 
 def _player_cards(
-    cards: dict[int, Iterable[int]] | Sequence[Iterable[int]],
+    cards: Mapping[int, Iterable[int]] | Sequence[Iterable[int]],
     *,
     sort_cards: bool = False,
 ) -> PlayerCards:
-    if isinstance(cards, dict):
+    if isinstance(cards, Mapping):
         values = [tuple(cards.get(player, ())) for player in range(4)]
     else:
         if len(cards) != 4:
@@ -128,8 +129,8 @@ def _player_flags(flags: Iterable[bool]) -> PlayerFlags:
     return values  # type: ignore[return-value]
 
 
-def _player_calls(calls: dict[int, int] | Iterable[int | None]) -> PlayerCalls:
-    if isinstance(calls, dict):
+def _player_calls(calls: Mapping[int, int | None] | Sequence[int | None]) -> PlayerCalls:
+    if isinstance(calls, Mapping):
         values = tuple(calls.get(player) for player in range(4))
     else:
         values = tuple(calls)
@@ -139,9 +140,9 @@ def _player_calls(calls: dict[int, int] | Iterable[int | None]) -> PlayerCalls:
 
 
 def _pending_exchanges(
-    exchanges: dict[int, ExchangeAction] | Iterable[ExchangeAction | None],
+    exchanges: Mapping[int, ExchangeAction] | Sequence[ExchangeAction | None],
 ) -> PendingExchanges:
-    if isinstance(exchanges, dict):
+    if isinstance(exchanges, Mapping):
         values = tuple(exchanges.get(player) for player in range(4))
     else:
         values = tuple(exchanges)
@@ -450,8 +451,16 @@ class TichuRound:
         actions.extend(candidate_plays)
         return tuple(actions)
 
-    def apply(self, action: Action) -> "TichuRound":
-        if action not in self.legal_actions():
+    def apply(
+        self,
+        action: Action,
+        *,
+        legal_actions: Sequence[Action] | None = None,
+    ) -> "TichuRound":
+        if self.current_player is None or self.terminal:
+            raise ValueError(f"No legal actions are available in {self.phase.value}")
+        actions = self.legal_actions() if legal_actions is None else legal_actions
+        if action not in actions:
             raise ValueError(
                 f"Illegal action for player {self.current_player} in {self.phase.value}: {action}"
             )

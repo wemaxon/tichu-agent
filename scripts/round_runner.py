@@ -43,7 +43,7 @@ def play_agent_round(
 
         if verbose:
             print(f"{steps:04d} P{player} [{round_.phase.value}] {action}")
-        round_ = round_.apply(action)
+        round_ = round_.apply(action, legal_actions=legal_actions)
         steps += 1
         if steps > safety_limit:
             raise RuntimeError("Round exceeded the safety step limit")

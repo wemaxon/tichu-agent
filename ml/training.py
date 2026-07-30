@@ -147,10 +147,10 @@ def collect_training_round(
                 generator=generator,
             )
             transitions.append(transition)
-            state = env.step(transition.action_index)
+            state = env.step(transition.action_index, legal_actions=state.legal_actions)
         else:
             action = _baseline_action(baseline_agents[player], state)
-            state = env.step_action(action)
+            state = env.step_action(action, legal_actions=state.legal_actions)
 
     team_scores = env.round.round_scores
     if team_scores is None:

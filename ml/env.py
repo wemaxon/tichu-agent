@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
@@ -105,22 +106,34 @@ class TichuEnv:
             reward_scale=self.reward_scale,
         )
 
-    def step(self, action_index: int) -> TichuEnvState:
+    def step(
+        self,
+        action_index: int,
+        *,
+        legal_actions: Sequence[Action] | None = None,
+    ) -> TichuEnvState:
         if self._round.terminal:
             raise RuntimeError("Cannot step a terminal environment")
 
-        legal_actions = self._round.legal_actions()
-        if action_index < 0 or action_index >= len(legal_actions):
+        actions = self._round.legal_actions() if legal_actions is None else legal_actions
+        if action_index < 0 or action_index >= len(actions):
             raise IndexError(f"action_index out of range: {action_index}")
-        return self.step_action(legal_actions[action_index])
+        return self.step_action(actions[action_index], legal_actions=actions)
 
-    def step_action(self, action: Action) -> TichuEnvState:
+    def step_action(
+        self,
+        action: Action,
+        *,
+        legal_actions: Sequence[Action] | None = None,
+    ) -> TichuEnvState:
         if self._round.terminal:
             raise RuntimeError("Cannot step a terminal environment")
-        if action not in self._round.legal_actions():
+
+        actions = self._round.legal_actions() if legal_actions is None else legal_actions
+        if action not in actions:
             raise ValueError(f"Illegal action: {action!r}")
 
-        self._round = self._round.apply(action)
+        self._round = self._round.apply(action, legal_actions=actions)
         self._steps += 1
         if self._steps > self.safety_limit:
             raise RuntimeError("Environment exceeded the safety step limit")

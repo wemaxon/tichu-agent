@@ -70,15 +70,22 @@ def run_console_round(
         if player is None:
             raise RuntimeError("No current player in a non-terminal round")
 
+        legal_actions = round_.legal_actions()
+        if not legal_actions:
+            raise RuntimeError(f"No legal actions in phase {round_.phase.value}")
+
         if player == human:
             _print_human_turn(round_, human)
-            action = _prompt_human_action(round_, human)
+            action = _prompt_human_action(round_, human, legal_actions)
         else:
             agent = agents[player]
-            action = agent.choose_action(round_.observation(player), round_.legal_actions())
+            action = agent.choose_action(round_.observation(player), legal_actions)
+
+        if action not in legal_actions:
+            raise RuntimeError(f"Player P{player} selected an illegal action: {action!r}")
 
         before_events = len(round_.public_history)
-        round_ = round_.apply(action)
+        round_ = round_.apply(action, legal_actions=legal_actions)
         _print_action_result(player, action, round_.public_history[before_events:], human=human)
 
         steps += 1
@@ -145,11 +152,11 @@ def _print_human_turn(round_: TichuRound, human: int) -> None:
     _print_indexed_cards(_sorted_hand_ids(round_.hands[human]))
 
 
-def _prompt_human_action(round_: TichuRound, human: int) -> Action:
-    actions = round_.legal_actions()
-    if not actions:
-        raise RuntimeError("No legal actions are available")
-
+def _prompt_human_action(
+    round_: TichuRound,
+    human: int,
+    actions: Sequence[Action],
+) -> Action:
     if round_.phase is Phase.GRAND_TICHU:
         return _prompt_grand_tichu(actions)
     if round_.phase is Phase.EXCHANGE:
