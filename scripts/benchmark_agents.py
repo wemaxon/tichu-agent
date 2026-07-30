@@ -14,13 +14,19 @@ from typing import Any, TextIO
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agents import Agent, available_agent_names, create_agent
+from agents import Agent, AgentCache, available_agent_names
+from scripts.eval_stats import (
+    ConfidenceInterval,
+    mean_confidence_interval,
+    wilson_score_interval,
+)
 from scripts.round_runner import add_round_config_args, play_agent_round, round_config_from_args
 from tichu.config import TichuRoundConfig
 from tichu.round import team_of
 
 
 AgentLineup = tuple[str, str, str, str]
+AgentBuilder = Callable[[AgentLineup, int, int], list[Agent]]
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -122,6 +128,7 @@ class BenchmarkResult:
     seed: int
     dealer: int
     config: TichuRoundConfig
+    confidence_level: float
     rounds: tuple[PlayedRound, ...]
     elapsed_seconds: float
 
@@ -158,6 +165,12 @@ class BenchmarkResult:
         return self.played_rounds - self.agent_a_wins - self.agent_b_wins
 
     @property
+    def agent_a_win_rate(self) -> float:
+        if not self.rounds:
+            return 0.0
+        return self.agent_a_wins / self.played_rounds
+
+    @property
     def agent_a_double_victories(self) -> int:
         return sum(1 for round_ in self.rounds if round_.double_victory_for == "A")
 
@@ -183,6 +196,21 @@ class BenchmarkResult:
             return 0.0
         return statistics.fmean(round_.steps for round_ in self.rounds)
 
+    @property
+    def mean_score_diff_ci(self) -> ConfidenceInterval:
+        return mean_confidence_interval(
+            self.score_diffs,
+            confidence=self.confidence_level,
+        )
+
+    @property
+    def agent_a_win_rate_ci(self) -> ConfidenceInterval:
+        return wilson_score_interval(
+            self.agent_a_wins,
+            self.played_rounds,
+            confidence=self.confidence_level,
+        )
+
     def summary_dict(self) -> dict[str, Any]:
         return {
             "agent_a": self.agent_a,
@@ -192,15 +220,19 @@ class BenchmarkResult:
             "seed": self.seed,
             "dealer": self.dealer,
             "config": self.config.to_dict(),
+            "confidence_level": self.confidence_level,
             "elapsed_seconds": self.elapsed_seconds,
             "agent_a_score": self.agent_a_score,
             "agent_b_score": self.agent_b_score,
             "score_diff": self.score_diff,
             "mean_score_diff": self.mean_score_diff,
             "stdev_score_diff": self.stdev_score_diff,
+            "mean_score_diff_ci": self.mean_score_diff_ci.to_dict(),
             "agent_a_wins": self.agent_a_wins,
             "agent_b_wins": self.agent_b_wins,
             "ties": self.ties,
+            "agent_a_win_rate": self.agent_a_win_rate,
+            "agent_a_win_rate_ci": self.agent_a_win_rate_ci.to_dict(),
             "agent_a_double_victories": self.agent_a_double_victories,
             "agent_b_double_victories": self.agent_b_double_victories,
             "mean_steps": self.mean_steps,
@@ -221,10 +253,23 @@ def run_benchmark(
     seed: int,
     dealer: int,
     config: TichuRoundConfig,
+    confidence_level: float = 0.95,
     progress: ProgressCallback | None = None,
+    build_agents: AgentBuilder | None = None,
 ) -> BenchmarkResult:
     if round_pairs < 1:
         raise ValueError("round_pairs must be at least 1")
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError("confidence_level must be between 0 and 1")
+
+    if build_agents is None:
+        agent_cache = AgentCache()
+        build_agents = lambda lineup, seed_, offset: _build_agents(
+            lineup,
+            seed=seed_,
+            offset=offset,
+            agent_cache=agent_cache,
+        )
 
     started = time.perf_counter()
     rounds: list[PlayedRound] = []
@@ -240,6 +285,7 @@ def run_benchmark(
                 lineup=(agent_a, agent_b, agent_a, agent_b),
                 agent_a_team=0,
                 config=config,
+                build_agents=build_agents,
             )
         )
         if progress is not None:
@@ -252,6 +298,7 @@ def run_benchmark(
                 lineup=(agent_b, agent_a, agent_b, agent_a),
                 agent_a_team=1,
                 config=config,
+                build_agents=build_agents,
             )
         )
         if progress is not None:
@@ -264,6 +311,7 @@ def run_benchmark(
         seed=seed,
         dealer=dealer,
         config=config,
+        confidence_level=confidence_level,
         rounds=tuple(rounds),
         elapsed_seconds=time.perf_counter() - started,
     )
@@ -277,8 +325,11 @@ def _play_benchmark_round(
     lineup: AgentLineup,
     agent_a_team: int,
     config: TichuRoundConfig,
+    build_agents: AgentBuilder,
 ) -> PlayedRound:
-    agents = _build_agents(lineup, seed=seed, offset=index)
+    agents = build_agents(lineup, seed, index)
+    if len(agents) != 4:
+        raise ValueError("build_agents must return exactly four agents")
     result = play_agent_round(seed=seed, dealer=dealer, agents=agents, config=config)
     round_ = result.round
 
@@ -297,9 +348,15 @@ def _play_benchmark_round(
     )
 
 
-def _build_agents(lineup: AgentLineup, *, seed: int, offset: int) -> list[Agent]:
+def _build_agents(
+    lineup: AgentLineup,
+    *,
+    seed: int,
+    offset: int,
+    agent_cache: AgentCache,
+) -> list[Agent]:
     return [
-        create_agent(agent_name, seed * 10_000 + offset * 100 + player)
+        agent_cache.create(agent_name, seed * 10_000 + offset * 100 + player)
         for player, agent_name in enumerate(lineup)
     ]
 
@@ -350,17 +407,21 @@ def write_csv_rounds(result: BenchmarkResult, path: str) -> None:
 def print_summary(result: BenchmarkResult) -> None:
     summary = result.summary_dict()
     win_rate = 100.0 * result.agent_a_wins / result.played_rounds
+    score_ci = result.mean_score_diff_ci
+    win_ci = result.agent_a_win_rate_ci
     print(f"Benchmark: {result.agent_a}+{result.agent_a} vs {result.agent_b}+{result.agent_b}")
     print(f"Round pairs: {result.round_pairs} ({result.played_rounds} played rounds)")
     print(f"Seed: {result.seed} | Dealer start: P{result.dealer}")
     print(f"Score: A={result.agent_a_score} B={result.agent_b_score} diff={result.score_diff:+d}")
     print(
         f"Avg diff/round: {result.mean_score_diff:+.2f} "
-        f"(stdev {result.stdev_score_diff:.2f})"
+        f"(stdev {result.stdev_score_diff:.2f}, "
+        f"{100 * score_ci.confidence:.0f}% CI {score_ci.low:+.2f}..{score_ci.high:+.2f})"
     )
     print(
         f"Wins: A={result.agent_a_wins} B={result.agent_b_wins} "
-        f"ties={result.ties} | A win rate={win_rate:.1f}%"
+        f"ties={result.ties} | A win rate={win_rate:.1f}% "
+        f"({100 * win_ci.confidence:.0f}% CI {100 * win_ci.low:.1f}%..{100 * win_ci.high:.1f}%)"
     )
     print(
         "Double victories: "
@@ -399,6 +460,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dealer", type=int, choices=range(4), default=0)
+    parser.add_argument(
+        "--confidence",
+        type=float,
+        default=0.95,
+        help="Confidence level for reported score-diff and win-rate intervals",
+    )
     parser.add_argument("--json", type=str, help="Write summary and per-round results as JSON")
     parser.add_argument("--csv", type=str, help="Write per-round results as CSV")
     parser.add_argument(
@@ -416,6 +483,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.round_pairs < 1:
         parser.error("--round-pairs must be at least 1")
+    if not 0.0 < args.confidence < 1.0:
+        parser.error("--confidence must be between 0 and 1")
 
     progress_bar = None
     if args.progress == "always" or (args.progress == "auto" and sys.stderr.isatty()):
@@ -429,6 +498,7 @@ def main() -> int:
             seed=args.seed,
             dealer=args.dealer,
             config=round_config_from_args(args),
+            confidence_level=args.confidence,
             progress=progress_bar.update if progress_bar is not None else None,
         )
     except ValueError as exc:

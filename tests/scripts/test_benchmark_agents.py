@@ -45,6 +45,8 @@ def test_benchmark_runs_paired_rounds_and_swaps_teams() -> None:
     assert result.agent_b_score == sum(round_.agent_b_score for round_ in result.rounds)
     assert result.score_diff == result.agent_a_score - result.agent_b_score
     assert all(round_.steps > 0 for round_ in result.rounds)
+    assert result.mean_score_diff_ci.confidence == 0.95
+    assert result.agent_a_win_rate_ci.confidence == 0.95
 
 
 def test_benchmark_writes_json_and_csv(tmp_path) -> None:
@@ -66,6 +68,8 @@ def test_benchmark_writes_json_and_csv(tmp_path) -> None:
     assert payload["summary"]["agent_a"] == "greedy"
     assert payload["summary"]["agent_b"] == "random"
     assert payload["summary"]["played_rounds"] == 2
+    assert "mean_score_diff_ci" in payload["summary"]
+    assert "agent_a_win_rate_ci" in payload["summary"]
     assert len(payload["rounds"]) == 2
 
     with csv_path.open(encoding="utf-8", newline="") as handle:

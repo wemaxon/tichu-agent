@@ -2,13 +2,14 @@ from .actor_critic import ActorCriticAgent, ActorCriticAgentState
 from .base import Agent, LegalActions
 from .greedy import GreedyAgent
 from .heuristic import HeuristicAgent
-from .registry import available_agent_names, create_agent
+from .registry import AgentCache, available_agent_names, create_agent
 from .random import RandomAgent
 
 __all__ = [
     "Agent",
     "ActorCriticAgent",
     "ActorCriticAgentState",
+    "AgentCache",
     "GreedyAgent",
     "HeuristicAgent",
     "LegalActions",
