@@ -43,10 +43,11 @@ def _heuristic_agent(seed: int, argument: str | None) -> Agent:
 
 
 def _actor_critic_agent(seed: int, argument: str | None) -> Agent:
+    _ = seed
     from .actor_critic import ActorCriticAgent
 
     if argument is None:
-        return ActorCriticAgent.untrained(seed=seed, deterministic=True)
+        raise ValueError("Agent 'actor_critic' requires a checkpoint path")
     return ActorCriticAgent.from_checkpoint(argument, deterministic=True)
 
 

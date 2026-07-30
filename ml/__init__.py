@@ -19,8 +19,10 @@ from .policy_view import (
 
 _EXPORT_MODULES = {
     "CandidateBatch": ".batching",
-    "EncodedCandidate": ".batching",
-    "EncodedPolicyState": ".batching",
+    "EncodedCandidate": ".interfaces",
+    "EncodedPolicyState": ".interfaces",
+    "InferencePolicy": ".interfaces",
+    "PolicyDecisionLike": ".interfaces",
     "batch_candidates": ".batching",
     "batch_env_states": ".batching",
     "CHECKPOINT_FORMAT_VERSION": ".checkpoint",

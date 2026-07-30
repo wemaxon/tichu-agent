@@ -2,20 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
 
 import torch
 from torch import Tensor
 
-
-class EncodedCandidate(Protocol):
-    features: Sequence[float]
-
-
-class EncodedPolicyState(Protocol):
-    terminal: bool
-    observation_features: Sequence[float] | None
-    encoded_actions: Sequence[EncodedCandidate]
+from .interfaces import EncodedPolicyState
 
 
 @dataclass(frozen=True, slots=True)

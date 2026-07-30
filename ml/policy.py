@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 import torch
 
-from .batching import EncodedPolicyState, batch_env_states
+from .batching import batch_env_states
 from .distributions import RaggedCategorical
 from .encoding import ACTION_FEATURE_SIZE, OBSERVATION_FEATURE_SIZE
+from .interfaces import EncodedPolicyState, InferencePolicy
 from .models import ActorCriticConfig, ParametricActorCritic
 
 
@@ -38,7 +39,7 @@ def create_actor_critic(
     return model
 
 
-class ParametricPolicy:
+class ParametricPolicy(InferencePolicy):
     """Inference adapter from an encoded environment state to a legal action index."""
 
     def __init__(self, model: ParametricActorCritic) -> None:
@@ -51,7 +52,6 @@ class ParametricPolicy:
         state: EncodedPolicyState,
         *,
         deterministic: bool = False,
-        generator: torch.Generator | None = None,
     ) -> PolicyDecision:
         parameter = next(self.model.parameters())
         batch = batch_env_states(
@@ -64,7 +64,7 @@ class ParametricPolicy:
         local_indices = (
             distribution.mode()
             if deterministic
-            else distribution.sample(generator=generator)
+            else distribution.sample()
         )
         log_probability = distribution.log_prob(local_indices)[0]
         return PolicyDecision(

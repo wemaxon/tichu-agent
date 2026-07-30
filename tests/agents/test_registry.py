@@ -19,6 +19,11 @@ def test_agent_registry_rejects_missing_spec_argument() -> None:
         create_agent("actor_critic:", seed=123)
 
 
+def test_actor_critic_registry_entry_requires_checkpoint() -> None:
+    with pytest.raises(ValueError, match="requires a checkpoint"):
+        create_agent("actor_critic", seed=123)
+
+
 def test_agent_registry_rejects_arguments_for_rule_based_agents() -> None:
     with pytest.raises(ValueError, match="does not accept an argument"):
         create_agent("greedy:model.pt", seed=123)

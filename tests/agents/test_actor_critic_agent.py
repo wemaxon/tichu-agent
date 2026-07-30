@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 
 from agents.actor_critic import ActorCriticAgent, ActorCriticAgentState
 from ml.encoding import ACTION_FEATURE_SIZE, OBSERVATION_FEATURE_SIZE
+from ml.interfaces import EncodedPolicyState
 from tichu.actions import Action
+from tichu.observations import RoundObservation
 from tichu.round import TichuRound
 
 
@@ -21,22 +22,20 @@ class _Policy:
         self.action_index = action_index
         self.seen_state: ActorCriticAgentState | None = None
         self.seen_deterministic: bool | None = None
-        self.seen_generator: Any | None = None
 
     def decide(
         self,
-        state: ActorCriticAgentState,
+        state: EncodedPolicyState,
         *,
         deterministic: bool = False,
-        generator: Any | None = None,
     ) -> _Decision:
+        assert isinstance(state, ActorCriticAgentState)
         self.seen_state = state
         self.seen_deterministic = deterministic
-        self.seen_generator = generator
         return _Decision(self.action_index)
 
 
-def _turn() -> tuple[int, Any, tuple[Action, ...]]:
+def _turn() -> tuple[int, RoundObservation, tuple[Action, ...]]:
     round_ = TichuRound.new(seed=0, dealer=0)
     player = round_.current_player
     assert player is not None
@@ -46,17 +45,14 @@ def _turn() -> tuple[int, Any, tuple[Action, ...]]:
 def test_actor_critic_agent_selects_policy_action_index() -> None:
     _, observation, actions = _turn()
     policy = _Policy(action_index=1)
-    generator = object()
 
     action = ActorCriticAgent(
         policy,
         deterministic=False,
-        generator=generator,
     ).choose_action(observation, actions)
 
     assert action == actions[1]
     assert policy.seen_deterministic is False
-    assert policy.seen_generator is generator
     assert policy.seen_state is not None
     assert policy.seen_state.terminal is False
     assert policy.seen_state.observation_features is not None
