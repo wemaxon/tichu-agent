@@ -68,6 +68,17 @@ _EXPORT_MODULES = {
     "policy_view": ".policy_view",
     "relative_player": ".policy_view",
     "rotate_player_values": ".policy_view",
+    "ActorCriticLoss": ".training",
+    "ActorCriticTrainingConfig": ".training",
+    "BaselineAgent": ".training",
+    "LearnerTransition": ".training",
+    "TrainingRollout": ".training",
+    "TrainingRoundResult": ".training",
+    "collect_training_round": ".training",
+    "compute_actor_critic_loss": ".training",
+    "learner_players_for_team": ".training",
+    "mean_training_result": ".training",
+    "train_actor_critic_round": ".training",
 }
 
 __all__ = tuple(_EXPORT_MODULES)
