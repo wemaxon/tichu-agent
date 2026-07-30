@@ -25,6 +25,7 @@ from ml.encoding import (
     encode_observation,
 )
 from tichu.actions import (
+    BombAction,
     DeclareSmallTichu,
     DragonGiftAction,
     ExchangeAction,
@@ -35,7 +36,7 @@ from tichu.cards import Special
 from tichu.combinations import CombinationKind
 from tichu.round import TichuRound
 
-from .helpers import card_id, combo_of_kind
+from .helpers import card_id, combo_of_kind, normal_ids
 
 
 def test_card_mask_uses_canonical_card_ids() -> None:
@@ -107,6 +108,23 @@ def test_exchange_action_encoder_marks_recipient_card_matrix() -> None:
     assert features[ACTION_TRANSFER_MASK_OFFSET + 1 * CARD_COUNT + 0] == 1.0
     assert features[ACTION_TRANSFER_MASK_OFFSET + 2 * CARD_COUNT + 26] == 1.0
     assert features[ACTION_TRANSFER_MASK_OFFSET + 3 * CARD_COUNT + 55] == 1.0
+
+
+def test_on_turn_and_out_of_turn_bombs_use_stable_distinct_action_types() -> None:
+    bomb = combo_of_kind(normal_ids(8), CombinationKind.FOUR_BOMB)
+
+    on_turn = encode_action(PlayAction(bomb), observer=0)
+    out_of_turn = encode_action(BombAction(bomb), observer=0)
+    decline = encode_action(BombAction(None), observer=0)
+
+    assert len(on_turn) == ACTION_FEATURE_SIZE
+    assert len(out_of_turn) == ACTION_FEATURE_SIZE
+    assert len(decline) == ACTION_FEATURE_SIZE
+    assert on_turn[ACTION_TYPE_OFFSET + ACTION_TYPE_INDEX["play"]] == 1.0
+    assert out_of_turn[ACTION_TYPE_OFFSET + ACTION_TYPE_INDEX["bomb"]] == 1.0
+    assert decline[ACTION_TYPE_OFFSET + ACTION_TYPE_INDEX["bomb"]] == 1.0
+    assert out_of_turn[ACTION_COMBINATION_OFFSET + COMBINATION_PRESENT_OFFSET] == 1.0
+    assert decline[ACTION_COMBINATION_OFFSET + COMBINATION_PRESENT_OFFSET] == 0.0
 
 
 def test_tichu_and_dragon_action_specific_fields() -> None:

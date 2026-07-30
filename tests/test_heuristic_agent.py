@@ -55,7 +55,9 @@ def _observation(
     public_history: list[dict] | None = None,
 ) -> RoundObservation:
     return RoundObservation(
-        config=TichuRoundConfig().to_dict(),
+        config=TichuRoundConfig(
+            out_of_turn_bombs=phase == "bomb_window",
+        ).to_dict(),
         phase=phase,
         current_player=current_player,
         player=current_player,

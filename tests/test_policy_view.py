@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ml import (
+    OBSERVATION_FEATURE_SIZE,
+    POLICY_CONFIG_KEYS,
     PolicyExchange,
     PolicyExchangeCard,
     absolute_player,
@@ -45,6 +47,29 @@ def test_player_coordinates_round_trip_and_rotate() -> None:
         "p0",
         "p1",
     )
+
+
+def test_bomb_timing_modes_share_one_stable_observation_schema() -> None:
+    turn_only = TichuRound.new(seed=2, dealer=1)
+    interrupt = TichuRound.new(
+        seed=2,
+        dealer=1,
+        config=TichuRoundConfig(out_of_turn_bombs=True),
+    )
+    assert turn_only.current_player is not None
+    assert interrupt.current_player is not None
+
+    turn_only_view = policy_view(turn_only.observation(turn_only.current_player))
+    interrupt_view = policy_view(interrupt.observation(interrupt.current_player))
+    turn_only_features = encode_policy_observation(turn_only_view)
+    interrupt_features = encode_policy_observation(interrupt_view)
+    timing_index = POLICY_CONFIG_KEYS.index("out_of_turn_bombs")
+
+    assert not turn_only_view.config[timing_index]
+    assert interrupt_view.config[timing_index]
+    assert len(turn_only_features) == OBSERVATION_FEATURE_SIZE
+    assert len(interrupt_features) == OBSERVATION_FEATURE_SIZE
+    assert turn_only_features != interrupt_features
 
 
 def test_policy_view_canonicalizes_all_player_indexed_fields() -> None:

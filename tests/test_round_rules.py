@@ -14,6 +14,10 @@ from .helpers import card_id, combo_of_kind, make_round, normal_ids
 pytestmark = pytest.mark.rules
 
 
+def _out_of_turn_bomb_config() -> TichuRoundConfig:
+    return TichuRoundConfig(out_of_turn_bombs=True)
+
+
 def test_mahjong_wish_forces_fulfillable_plays() -> None:
     mahjong = combo_of_kind((card_id(special=Special.MAHJONG),), CombinationKind.SINGLE)
     round_ = make_round(
@@ -102,6 +106,7 @@ def test_wish_can_be_fulfilled_during_bomb_interruption() -> None:
             2: [card_id(2)],
             3: [card_id(3)],
         },
+        config=_out_of_turn_bomb_config(),
         phase=Phase.BOMB_WINDOW,
         current_player=1,
         wish_rank=5,
@@ -185,6 +190,7 @@ def test_dragon_trick_can_be_bombed_before_recipient_selection() -> None:
             2: [card_id(4)],
             3: [card_id(5)],
         },
+        config=_out_of_turn_bomb_config(),
         current_player=0,
     )
 
@@ -197,6 +203,55 @@ def test_dragon_trick_can_be_bombed_before_recipient_selection() -> None:
     assert round_.phase is not Phase.DRAGON_GIFT
     assert round_.pending_dragon_winner is None
     assert card_id(special=Special.DRAGON) in round_.captured[1]
+
+
+def test_bombs_use_normal_turn_order_by_default() -> None:
+    first_bomb = combo_of_kind(normal_ids(5), CombinationKind.FOUR_BOMB)
+    higher_bomb = combo_of_kind(normal_ids(6), CombinationKind.FOUR_BOMB)
+    round_ = make_round(
+        {
+            0: [*first_bomb.card_ids, card_id(9)],
+            1: [*higher_bomb.card_ids, card_id(10)],
+            2: [card_id(2)],
+            3: [card_id(3)],
+        },
+        current_player=0,
+    )
+
+    round_ = round_.apply(PlayAction(first_bomb))
+
+    assert round_.phase is Phase.PLAY
+    assert round_.current_player == 1
+    assert round_.bomb_queue == ()
+    assert round_.bomb_resume_player is None
+    assert round_.bomb_close_behavior is None
+    actions = round_.legal_actions()
+    assert PassAction() in actions
+    assert PlayAction(higher_bomb) in actions
+    assert not any(isinstance(action, BombAction) for action in actions)
+
+
+def test_turn_only_bomb_trick_resolves_through_normal_passes() -> None:
+    bomb = combo_of_kind(normal_ids(5), CombinationKind.FOUR_BOMB)
+    round_ = make_round(
+        {
+            0: [*bomb.card_ids, card_id(9)],
+            1: [card_id(10)],
+            2: [card_id(2)],
+            3: [card_id(3)],
+        },
+        current_player=0,
+    )
+
+    round_ = round_.apply(PlayAction(bomb))
+    for player in (1, 2, 3):
+        assert round_.current_player == player
+        round_ = round_.apply(PassAction())
+        assert round_.phase is not Phase.BOMB_WINDOW
+
+    assert round_.current_player == 0
+    assert round_.top_combination is None
+    assert set(bomb.card_ids).issubset(round_.captured[0])
 
 
 def test_player_can_go_out_by_playing_a_bomb() -> None:

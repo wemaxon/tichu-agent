@@ -49,7 +49,9 @@ def _observation(
     hand_sizes: tuple[int, int, int, int] | None = None,
 ) -> RoundObservation:
     return RoundObservation(
-        config=TichuRoundConfig().to_dict(),
+        config=TichuRoundConfig(
+            out_of_turn_bombs=phase == "bomb_window",
+        ).to_dict(),
         phase=phase,
         current_player=current_player,
         player=current_player,

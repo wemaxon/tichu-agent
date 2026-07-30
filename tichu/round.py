@@ -397,7 +397,7 @@ class TichuRound:
             )
 
         if self.phase is Phase.BOMB_WINDOW:
-            if not self.config.bombs:
+            if not self.config.out_of_turn_bombs:
                 return ()
             bombs = self._legal_bombs(player)
             return (BombAction(None),) + tuple(BombAction(combo) for combo in bombs)
@@ -629,30 +629,46 @@ class TichuRound:
             if ended:
                 return state
 
-        close_behavior = (
-            BombCloseBehavior.RESOLVE_TRICK
-            if combo.is_bomb
-            else BombCloseBehavior.CONTINUE
-        )
-        return state._open_bomb_window(
-            anchor=player,
-            resume_player=state._next_active(player),
-            close_behavior=close_behavior,
+        resume_player = state._next_active(player)
+        if state.config.out_of_turn_bombs:
+            close_behavior = (
+                BombCloseBehavior.RESOLVE_TRICK
+                if combo.is_bomb
+                else BombCloseBehavior.CONTINUE
+            )
+            return state._open_bomb_window(
+                anchor=player,
+                resume_player=resume_player,
+                close_behavior=close_behavior,
+            )
+        return replace(
+            state,
+            phase=Phase.PLAY,
+            current_player=resume_player,
         )
 
     def _apply_pass(self, player: int) -> "TichuRound":
         state = self._with_event(type="pass", player=player)
         state = replace(state, consecutive_passes=state.consecutive_passes + 1)
         needed = state._passes_needed()
-        close_behavior = (
-            BombCloseBehavior.RESOLVE_TRICK
-            if state.consecutive_passes >= needed
-            else BombCloseBehavior.CONTINUE
-        )
-        return state._open_bomb_window(
-            anchor=player,
-            resume_player=state._next_active(player),
-            close_behavior=close_behavior,
+        should_resolve = state.consecutive_passes >= needed
+        resume_player = state._next_active(player)
+        if state.config.out_of_turn_bombs:
+            return state._open_bomb_window(
+                anchor=player,
+                resume_player=resume_player,
+                close_behavior=(
+                    BombCloseBehavior.RESOLVE_TRICK
+                    if should_resolve
+                    else BombCloseBehavior.CONTINUE
+                ),
+            )
+        if should_resolve:
+            return state._resolve_trick()
+        return replace(
+            state,
+            phase=Phase.PLAY,
+            current_player=resume_player,
         )
 
     def _apply_bomb(self, player: int, action: BombAction) -> "TichuRound":
@@ -725,6 +741,8 @@ class TichuRound:
         resume_player: int,
         close_behavior: BombCloseBehavior,
     ) -> "TichuRound":
+        if not self.config.out_of_turn_bombs:
+            raise AssertionError("Bomb windows require out_of_turn_bombs")
         if self.top_combination is None or self.top_combination.is_dog:
             return replace(self, phase=Phase.PLAY, current_player=resume_player)
 
@@ -733,9 +751,6 @@ class TichuRound:
             bomb_resume_player=resume_player,
             bomb_close_behavior=close_behavior,
         )
-        if not state.config.bombs:
-            return state._close_bomb_window()
-
         queue = tuple(state._active_cycle_after(anchor))
         if not any(state._legal_bombs(player) for player in queue):
             return state._close_bomb_window()
@@ -879,7 +894,7 @@ class TichuRound:
         return generate_combinations(self.hands[player], self.config.bombs)
 
     def _legal_bombs(self, player: int) -> tuple[Combination, ...]:
-        if not self.config.bombs or self.top_combination is None:
+        if not self.config.out_of_turn_bombs or self.top_combination is None:
             return ()
         return tuple(
             combo
@@ -1072,8 +1087,14 @@ class TichuRound:
             raise AssertionError("Grand Tichu phase is disabled")
         if self.phase is Phase.EXCHANGE and not self.config.card_exchange:
             raise AssertionError("Card exchange phase is disabled")
-        if self.phase is Phase.BOMB_WINDOW and not self.config.bombs:
-            raise AssertionError("Bomb window phase is disabled")
+        if self.phase is Phase.BOMB_WINDOW and not self.config.out_of_turn_bombs:
+            raise AssertionError("Out-of-turn bomb windows are disabled")
+        if not self.config.out_of_turn_bombs and (
+            self.bomb_queue
+            or self.bomb_resume_player is not None
+            or self.bomb_close_behavior is not None
+        ):
+            raise AssertionError("Disabled out-of-turn bombs cannot retain bomb-window state")
         if self.phase is Phase.DRAGON_GIFT and not self.config.special_cards:
             raise AssertionError("Dragon gift phase requires special cards")
         if self.wish_rank is not None and self.wish_rank not in range(2, 15):

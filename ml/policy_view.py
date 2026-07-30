@@ -12,6 +12,7 @@ POLICY_CONFIG_KEYS: tuple[str, ...] = (
     "small_tichu",
     "card_exchange",
     "bombs",
+    "out_of_turn_bombs",
     "wishes",
     "special_cards",
 )

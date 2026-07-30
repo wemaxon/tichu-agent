@@ -14,13 +14,16 @@ pytestmark = [pytest.mark.random]
 
 
 def _config_for_index(index: int) -> TichuRoundConfig:
+    base_flags = index // 3
+    bomb_mode = index % 3
     return TichuRoundConfig(
-        grand_tichu=bool(index & 1),
-        small_tichu=bool(index & 2),
-        card_exchange=bool(index & 4),
-        bombs=bool(index & 8),
-        wishes=bool(index & 16),
-        special_cards=bool(index & 32),
+        grand_tichu=bool(base_flags & 1),
+        small_tichu=bool(base_flags & 2),
+        card_exchange=bool(base_flags & 4),
+        bombs=bomb_mode != 0,
+        out_of_turn_bombs=bomb_mode == 2,
+        wishes=bool(base_flags & 8),
+        special_cards=bool(base_flags & 16),
     )
 
 
@@ -70,4 +73,4 @@ def play_checked_round(seed: int, config: TichuRoundConfig) -> TichuRound:
 def test_random_rounds_preserve_engine_invariants(pytestconfig: pytest.Config) -> None:
     rounds = int(pytestconfig.getoption("--random-games"))
     for index in range(rounds):
-        play_checked_round(index, _config_for_index(index % 64))
+        play_checked_round(index, _config_for_index(index % 96))

@@ -68,8 +68,15 @@ def test_env_rejects_invalid_index_and_illegal_action() -> None:
         env.step_action(PassAction())
 
 
-def test_env_encodes_a_complete_full_rules_round() -> None:
-    env = TichuEnv(seed=7, dealer=3)
+@pytest.mark.parametrize("out_of_turn_bombs", [False, True])
+def test_env_encodes_a_complete_round_in_each_bomb_timing_mode(
+    out_of_turn_bombs: bool,
+) -> None:
+    env = TichuEnv(
+        seed=7,
+        dealer=3,
+        config=TichuRoundConfig(out_of_turn_bombs=out_of_turn_bombs),
+    )
     state = env.state()
 
     while not state.terminal:

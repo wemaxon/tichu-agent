@@ -10,6 +10,7 @@ class TichuRoundConfig:
     small_tichu: bool = True
     card_exchange: bool = True
     bombs: bool = True
+    out_of_turn_bombs: bool = False
     wishes: bool = True
     special_cards: bool = True
 
@@ -17,6 +18,8 @@ class TichuRoundConfig:
         for name, value in asdict(self).items():
             if not isinstance(value, bool):
                 raise TypeError(f"{name} must be a bool")
+        if self.out_of_turn_bombs and not self.bombs:
+            raise ValueError("out_of_turn_bombs requires bombs to be enabled")
 
     def to_dict(self) -> dict[str, bool]:
         return asdict(self)
