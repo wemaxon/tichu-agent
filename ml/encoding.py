@@ -31,6 +31,9 @@ from .policy_view import (
 FeatureVector: TypeAlias = tuple[float, ...]
 T = TypeVar("T")
 
+OBSERVATION_SCHEMA_VERSION = 1
+ACTION_SCHEMA_VERSION = 1
+
 CARD_COUNT = len(CARD_CLASS_NAMES)
 MAX_HAND_SIZE = 14.0
 MAX_PLAY_RANK = 15.0

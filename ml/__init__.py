@@ -1,10 +1,26 @@
+from .batching import (
+    CandidateBatch,
+    EncodedCandidate,
+    EncodedPolicyState,
+    batch_candidates,
+    batch_env_states,
+)
+from .checkpoint import (
+    CHECKPOINT_FORMAT_VERSION,
+    CheckpointCompatibilityError,
+    load_actor_critic_checkpoint,
+    save_actor_critic_checkpoint,
+)
+from .distributions import RaggedCategorical
 from .encoding import (
     ACTION_FEATURE_SIZE,
+    ACTION_SCHEMA_VERSION,
     ACTION_TYPES,
     COMBINATION_FEATURE_SIZE,
     COMBINATION_KINDS,
     CONFIG_KEYS,
     OBSERVATION_FEATURE_SIZE,
+    OBSERVATION_SCHEMA_VERSION,
     PHASES,
     EncodedAction,
     encode_action,
@@ -12,6 +28,17 @@ from .encoding import (
     encode_legal_actions,
     encode_observation,
     encode_policy_observation,
+)
+from .models import (
+    ActorCriticConfig,
+    ActorCriticOutput,
+    ParametricActorCritic,
+)
+from .policy import (
+    ParametricPolicy,
+    PolicyDecision,
+    create_actor_critic,
+    default_actor_critic_config,
 )
 from .env import (
     PlayerRewards,
@@ -35,12 +62,24 @@ from .policy_view import (
 )
 
 __all__ = (
+    "CandidateBatch",
+    "EncodedCandidate",
+    "EncodedPolicyState",
+    "batch_candidates",
+    "batch_env_states",
+    "CHECKPOINT_FORMAT_VERSION",
+    "CheckpointCompatibilityError",
+    "load_actor_critic_checkpoint",
+    "save_actor_critic_checkpoint",
+    "RaggedCategorical",
     "ACTION_FEATURE_SIZE",
+    "ACTION_SCHEMA_VERSION",
     "ACTION_TYPES",
     "COMBINATION_FEATURE_SIZE",
     "COMBINATION_KINDS",
     "CONFIG_KEYS",
     "OBSERVATION_FEATURE_SIZE",
+    "OBSERVATION_SCHEMA_VERSION",
     "PHASES",
     "EncodedAction",
     "encode_action",
@@ -48,6 +87,13 @@ __all__ = (
     "encode_legal_actions",
     "encode_observation",
     "encode_policy_observation",
+    "ActorCriticConfig",
+    "ActorCriticOutput",
+    "ParametricActorCritic",
+    "ParametricPolicy",
+    "PolicyDecision",
+    "create_actor_critic",
+    "default_actor_critic_config",
     "PlayerRewards",
     "RewardMode",
     "TeamRewards",
