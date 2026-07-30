@@ -25,6 +25,13 @@ Select agents per player:
 python -m scripts.tichu_cli play --agents random random greedy heuristic
 ```
 
+Bomb combinations are enabled by default and follow normal turn order. Enable
+standard Tichu-style interrupt windows explicitly:
+
+```bash
+python -m scripts.tichu_cli play --out-of-turn-bombs
+```
+
 #### Play from the console
 ```bash
 python -m scripts.tichu_cli console --seat 0 --agent random
@@ -34,6 +41,56 @@ This controls one human seat and assigns agents to the other three seats,
 including the human player's partner.
 
 ## RL Environment
+
+```mermaid
+  flowchart TB
+      subgraph APPLICATION["Training / Evaluation"]
+          direction TB
+          TRAINER["Rollout Collector / Trainer"]
+          POLICY["Policy + Value Network"]
+
+          TRAINER -->|"observation and legal-action features"| POLICY
+          POLICY -->|"action index, value and log probability"| TRAINER
+      end
+
+      subgraph ML["ML Environment — ml/"]
+          direction TB
+
+          ENV["TichuEnv<br/>reset • state • step"]
+          POLICY_VIEW(["PolicyObservation<br/>actor-relative and player-safe"])
+          OBS_ENCODER["Observation Encoder"]
+          ACTION_ENCODER["Legal-Action Encoder"]
+          ENV_STATE(["TichuEnvState<br/>features • candidates • rewards"])
+
+          subgraph ENGINE["Tichu Engine — tichu/"]
+              direction TB
+
+              DOMAIN["Domain Model<br/>cards • combinations • actions • config"]
+              ROUND["TichuRound<br/>immutable state machine"]
+              OBSERVATION(["RoundObservation<br/>observable information"])
+              LEGAL_ACTIONS(["Legal actions<br/>tuple of Action objects"])
+
+              DOMAIN -->|"defines game concepts used by"| ROUND
+              ROUND -->|"observation(player)"| OBSERVATION
+              ROUND -->|"legal_actions()"| LEGAL_ACTIONS
+          end
+
+          ENV -->|"creates, owns and advances"| ROUND
+          OBSERVATION -->|"policy_view()"| POLICY_VIEW
+          POLICY_VIEW -->|"encode_policy_observation()"| OBS_ENCODER
+          LEGAL_ACTIONS -->|"encode_legal_actions(observer=player)"| ACTION_ENCODER
+          OBS_ENCODER -->|"observation_features"| ENV_STATE
+          ACTION_ENCODER -->|"encoded_actions"| ENV_STATE
+          ENV -->|"adds player, terminal state and rewards"| ENV_STATE
+      end
+
+      TRAINER -->|"reset() or step(action_index)"| ENV
+      ENV_STATE -->|"returned after reset, state or step"| TRAINER
+
+      style ENGINE fill:#fff4d6,stroke:#d39b24,stroke-width:3px
+      style ML fill:#e8f4ff,stroke:#3278a8,stroke-width:3px
+      style APPLICATION fill:#e9f8ec,stroke:#3c8c4c,stroke-width:3px
+```
 
 `TichuEnv` exposes actor-relative policy observations and variable legal-action
 features without exposing the underlying round or opponents' hands:
