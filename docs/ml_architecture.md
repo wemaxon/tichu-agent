@@ -393,7 +393,8 @@ Run the same training with periodic held-out evaluation and metrics:
 python -m scripts.train_actor_critic \
   --opponent greedy \
   --rounds 1000 \
-  --checkpoint checkpoints/actor_critic.pt \
+  --checkpoint checkpoints/actor_critic.latest.pt \
+  --best-checkpoint checkpoints/actor_critic.best.pt \
   --eval-every 100 \
   --eval-round-pairs 50 \
   --eval-seed 1000000 \
@@ -401,6 +402,9 @@ python -m scripts.train_actor_critic \
   --metrics-csv runs/actor_critic.csv
 ```
 
+`--checkpoint` is the latest/final model. `--best-checkpoint` is updated only
+when held-out `eval_mean_score_diff` improves. If `--best-checkpoint` is omitted
+while evaluation is enabled, it defaults to `<checkpoint stem>.best<suffix>`.
 `--seed` controls training deals. `--eval-seed` controls evaluation deals and
 should be kept outside the training seed range.
 

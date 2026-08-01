@@ -17,6 +17,8 @@ from .models import ActorCriticConfig, ParametricActorCritic
 
 CHECKPOINT_FORMAT_VERSION = 1
 CheckpointPath: TypeAlias = str | Path
+CheckpointMetadataValue: TypeAlias = str | int | float | bool | None
+CheckpointMetadata: TypeAlias = Mapping[str, CheckpointMetadataValue]
 
 
 class CheckpointCompatibilityError(ValueError):
@@ -26,6 +28,8 @@ class CheckpointCompatibilityError(ValueError):
 def save_actor_critic_checkpoint(
     path: CheckpointPath,
     model: ParametricActorCritic,
+    *,
+    metadata: CheckpointMetadata | None = None,
 ) -> None:
     _validate_feature_sizes(model.config)
     checkpoint = {
@@ -37,7 +41,12 @@ def save_actor_critic_checkpoint(
         "model_config": model.config.to_dict(),
         "model_state_dict": dict(model.state_dict()),
     }
-    torch.save(checkpoint, Path(path))
+    if metadata is not None:
+        checkpoint["metadata"] = dict(metadata)
+
+    checkpoint_path = Path(path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, checkpoint_path)
 
 
 def load_actor_critic_checkpoint(

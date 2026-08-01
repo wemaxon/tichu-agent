@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import torch
+
 from ml import ACTION_FEATURE_SIZE, OBSERVATION_FEATURE_SIZE
 from ml.models import ActorCriticConfig, ParametricActorCritic
+from scripts.benchmark_agents import BenchmarkResult, PlayedRound
 from scripts.train_actor_critic import (
     CURRENT_POLICY_SPEC,
+    TrainingCheckpointManager,
+    _default_best_checkpoint_path,
     _evaluate_model,
     _evaluation_metrics_record,
 )
@@ -33,6 +40,72 @@ def _fast_config() -> TichuRoundConfig:
         wishes=False,
         special_cards=False,
     )
+
+
+def _benchmark_result(score_diff: int) -> BenchmarkResult:
+    return BenchmarkResult(
+        agent_a=CURRENT_POLICY_SPEC,
+        agent_b="greedy",
+        round_pairs=1,
+        seed=10_000,
+        dealer=0,
+        config=_fast_config(),
+        confidence_level=0.95,
+        rounds=(
+            PlayedRound(
+                index=0,
+                seed=10_000,
+                dealer=0,
+                lineup=(CURRENT_POLICY_SPEC, "greedy", CURRENT_POLICY_SPEC, "greedy"),
+                agent_a_team=0,
+                team_scores=(score_diff, 0),
+                finish_order=(0, 2, 1, 3),
+                steps=10,
+            ),
+        ),
+        elapsed_seconds=0.1,
+    )
+
+
+def test_default_best_checkpoint_path_uses_best_before_suffix() -> None:
+    assert _default_best_checkpoint_path(Path("checkpoints/policy.pt")) == Path(
+        "checkpoints/policy.best.pt"
+    )
+    assert _default_best_checkpoint_path(Path("checkpoints/policy")) == Path(
+        "checkpoints/policy.best"
+    )
+
+
+def test_training_checkpoint_manager_keeps_latest_and_best(
+    tmp_path: Path,
+) -> None:
+    manager = TrainingCheckpointManager(
+        latest_path=tmp_path / "latest.pt",
+        best_path=tmp_path / "best.pt",
+        total_rounds=10,
+        opponent="greedy",
+        train_seed=0,
+        dealer=0,
+        learner_players=(0, 2),
+    )
+    model = _model()
+
+    manager.save_latest(model, round_number=1)
+    assert manager.latest_path.exists()
+    latest = torch.load(manager.latest_path, weights_only=True)
+    assert latest["metadata"]["checkpoint_role"] == "latest"
+    assert latest["metadata"]["train_round"] == 1
+
+    assert manager.maybe_save_best(model, 2, _benchmark_result(25))
+    assert manager.best_path is not None
+    best = torch.load(manager.best_path, weights_only=True)
+    assert best["metadata"]["checkpoint_role"] == "best"
+    assert best["metadata"]["train_round"] == 2
+    assert best["metadata"]["eval_mean_score_diff"] == 25.0
+
+    assert not manager.maybe_save_best(model, 3, _benchmark_result(5))
+    unchanged = torch.load(manager.best_path, weights_only=True)
+    assert unchanged["metadata"]["train_round"] == 2
 
 
 def test_evaluate_model_uses_current_in_memory_policy_and_restores_mode() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -77,7 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
         description="Train one shared actor-critic policy against fixed baseline agents"
     )
     parser.add_argument("--rounds", type=int, default=1000)
-    parser.add_argument("--checkpoint", required=True, help="Where to save the trained model")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Where to save the latest/final trained model",
+    )
+    parser.add_argument(
+        "--best-checkpoint",
+        help=(
+            "Where to save the best held-out evaluation model. "
+            "Requires --eval-every. Defaults to <checkpoint stem>.best<suffix>."
+        ),
+    )
     parser.add_argument(
         "--init-checkpoint",
         help="Optional model checkpoint to initialize from; optimizer state is not loaded",
@@ -169,8 +181,19 @@ def main() -> int:
     generator = torch.Generator(device=device)
     generator.manual_seed(args.seed)
 
-    checkpoint_path = Path(args.checkpoint)
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_manager = TrainingCheckpointManager(
+        latest_path=Path(args.checkpoint),
+        best_path=_best_checkpoint_path(
+            Path(args.checkpoint),
+            args.best_checkpoint,
+            eval_enabled=bool(args.eval_every),
+        ),
+        total_rounds=args.rounds,
+        opponent=args.opponent,
+        train_seed=args.seed,
+        dealer=args.dealer,
+        learner_players=learner_players,
+    )
 
     recent: list[TrainingRoundResult] = []
     started = time.perf_counter()
@@ -179,6 +202,9 @@ def main() -> int:
         f"P{learner_players[0]}/P{learner_players[1]} vs {args.opponent} "
         f"for {args.rounds} rounds on {device}"
     )
+    print(f"Latest checkpoint: {checkpoint_manager.latest_path}")
+    if checkpoint_manager.best_path is not None:
+        print(f"Best checkpoint: {checkpoint_manager.best_path}")
 
     with MetricsWriter(
         jsonl_path=args.metrics_jsonl,
@@ -240,13 +266,102 @@ def main() -> int:
                         elapsed_seconds=time.perf_counter() - started,
                     )
                 )
+                if checkpoint_manager.maybe_save_best(model, round_number, evaluation):
+                    print(
+                        "best checkpoint updated: "
+                        f"round={round_number} "
+                        f"diff/round={evaluation.mean_score_diff:+.2f} "
+                        f"path={checkpoint_manager.best_path}"
+                    )
 
             if args.save_every and round_number % args.save_every == 0:
-                save_actor_critic_checkpoint(checkpoint_path, model)
+                checkpoint_manager.save_latest(model, round_number)
 
-    save_actor_critic_checkpoint(checkpoint_path, model)
-    print(f"Checkpoint written to {checkpoint_path}")
+    checkpoint_manager.save_latest(model, args.rounds)
+    print(f"Latest checkpoint written to {checkpoint_manager.latest_path}")
+    if checkpoint_manager.best_path is not None:
+        if checkpoint_manager.best_round is None:
+            print("Best checkpoint was not written because no evaluation ran.")
+        else:
+            assert checkpoint_manager.best_score is not None
+            print(
+                "Best checkpoint: "
+                f"{checkpoint_manager.best_path} "
+                f"(round {checkpoint_manager.best_round}, "
+                f"diff/round={checkpoint_manager.best_score:+.2f})"
+            )
     return 0
+
+
+@dataclass(slots=True)
+class TrainingCheckpointManager:
+    latest_path: Path
+    best_path: Path | None
+    total_rounds: int
+    opponent: str
+    train_seed: int
+    dealer: int
+    learner_players: tuple[int, ...]
+    best_score: float | None = None
+    best_round: int | None = None
+
+    def save_latest(self, model: ParametricActorCritic, round_number: int) -> None:
+        save_actor_critic_checkpoint(
+            self.latest_path,
+            model,
+            metadata=self._metadata("latest", round_number),
+        )
+
+    def maybe_save_best(
+        self,
+        model: ParametricActorCritic,
+        round_number: int,
+        evaluation: BenchmarkResult,
+    ) -> bool:
+        if self.best_path is None:
+            return False
+
+        score = evaluation.mean_score_diff
+        if self.best_score is not None and score <= self.best_score:
+            return False
+
+        self.best_score = score
+        self.best_round = round_number
+        save_actor_critic_checkpoint(
+            self.best_path,
+            model,
+            metadata=self._metadata("best", round_number, evaluation),
+        )
+        return True
+
+    def _metadata(
+        self,
+        role: str,
+        round_number: int,
+        evaluation: BenchmarkResult | None = None,
+    ) -> dict[str, str | int | float | bool | None]:
+        metadata: dict[str, str | int | float | bool | None] = {
+            "checkpoint_role": role,
+            "train_round": round_number,
+            "total_rounds": self.total_rounds,
+            "opponent": self.opponent,
+            "train_seed": self.train_seed,
+            "dealer": self.dealer,
+            "learner_players": ",".join(str(player) for player in self.learner_players),
+            "best_eval_round": self.best_round,
+            "best_eval_mean_score_diff": self.best_score,
+        }
+        if evaluation is not None:
+            metadata.update(
+                {
+                    "eval_round_pairs": evaluation.round_pairs,
+                    "eval_played_rounds": evaluation.played_rounds,
+                    "eval_seed": evaluation.seed,
+                    "eval_mean_score_diff": evaluation.mean_score_diff,
+                    "eval_agent_a_win_rate": evaluation.agent_a_win_rate,
+                }
+            )
+        return metadata
 
 
 def _build_baseline_agents(
@@ -425,6 +540,37 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--eval-round-pairs must be at least 1")
     if not 0.0 < args.eval_confidence < 1.0:
         parser.error("--eval-confidence must be between 0 and 1")
+    if args.best_checkpoint and not args.eval_every:
+        parser.error("--best-checkpoint requires --eval-every")
+    if args.eval_every:
+        latest_path = Path(args.checkpoint)
+        best_path = _best_checkpoint_path(
+            latest_path,
+            args.best_checkpoint,
+            eval_enabled=True,
+        )
+        assert best_path is not None
+        if latest_path.expanduser().resolve() == best_path.expanduser().resolve():
+            parser.error("--best-checkpoint must differ from --checkpoint")
+
+
+def _best_checkpoint_path(
+    latest_path: Path,
+    requested_path: str | None,
+    *,
+    eval_enabled: bool,
+) -> Path | None:
+    if requested_path is not None:
+        return Path(requested_path)
+    if not eval_enabled:
+        return None
+    return _default_best_checkpoint_path(latest_path)
+
+
+def _default_best_checkpoint_path(latest_path: Path) -> Path:
+    if latest_path.suffix:
+        return latest_path.with_name(f"{latest_path.stem}.best{latest_path.suffix}")
+    return latest_path.with_name(f"{latest_path.name}.best")
 
 
 if __name__ == "__main__":

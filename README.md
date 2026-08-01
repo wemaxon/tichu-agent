@@ -153,7 +153,8 @@ Train one shared actor-critic policy for one team against a fixed baseline:
 python -m scripts.train_actor_critic \
   --opponent greedy \
   --rounds 1000 \
-  --checkpoint checkpoints/actor_critic.pt \
+  --checkpoint checkpoints/actor_critic.latest.pt \
+  --best-checkpoint checkpoints/actor_critic.best.pt \
   --eval-every 100 \
   --eval-round-pairs 50 \
   --eval-seed 1000000 \
@@ -164,3 +165,7 @@ python -m scripts.train_actor_critic \
 Training seeds come from `--seed`; held-out evaluation seeds come from
 `--eval-seed`. Keep them separate so evaluation is not measured on training
 deals.
+
+`--checkpoint` is always the latest/final model. `--best-checkpoint` is updated
+only when held-out evaluation improves; if omitted while `--eval-every` is
+enabled, it defaults to `<checkpoint stem>.best<suffix>`.
