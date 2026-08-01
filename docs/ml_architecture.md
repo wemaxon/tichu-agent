@@ -408,6 +408,22 @@ while evaluation is enabled, it defaults to `<checkpoint stem>.best<suffix>`.
 `--seed` controls training deals. `--eval-seed` controls evaluation deals and
 should be kept outside the training seed range.
 
+Plot one or more training runs after metrics have been written:
+
+```bash
+python -m scripts.plot_training_metrics \
+  --metrics runs/actor_critic.csv \
+  --out runs/plots
+```
+
+Generated plots:
+
+- `eval_score`: held-out mean score difference with confidence interval and best
+  checkpoint marker.
+- `eval_win_rate`: held-out win rate with confidence interval.
+- `training_diagnostics`: train return, policy loss, value loss, and entropy.
+- `double_victories`: held-out double-victory counts for both sides.
+
 Useful early simplification while debugging training speed:
 
 ```bash

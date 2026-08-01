@@ -169,3 +169,23 @@ deals.
 `--checkpoint` is always the latest/final model. `--best-checkpoint` is updated
 only when held-out evaluation improves; if omitted while `--eval-every` is
 enabled, it defaults to `<checkpoint stem>.best<suffix>`.
+
+Plot training and held-out evaluation curves from one or more metrics files:
+
+```bash
+python -m scripts.plot_training_metrics \
+  --metrics runs/actor_critic.csv \
+  --out runs/plots
+```
+
+For run comparisons:
+
+```bash
+python -m scripts.plot_training_metrics \
+  --metrics runs/test_a/actor_critic.csv runs/test_b/actor_critic.csv \
+  --labels test_a test_b \
+  --out runs/comparison_plots
+```
+
+The script writes `eval_score`, `eval_win_rate`, `training_diagnostics`, and
+`double_victories` plots.
