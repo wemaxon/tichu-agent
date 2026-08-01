@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from ml import ACTION_FEATURE_SIZE, OBSERVATION_FEATURE_SIZE
 from ml.models import ActorCriticConfig, ParametricActorCritic
+from ml.training import TrainingBatchResult
 from scripts.benchmark_agents import BenchmarkResult, PlayedRound
 from scripts.train_actor_critic import (
     CURRENT_POLICY_SPEC,
+    LinearSchedule,
     TrainingCheckpointManager,
     _default_best_checkpoint_path,
     _evaluate_model,
     _evaluation_metrics_record,
+    _training_metrics_record,
 )
 from tichu.config import TichuRoundConfig
 
@@ -106,6 +110,69 @@ def test_training_checkpoint_manager_keeps_latest_and_best(
     assert not manager.maybe_save_best(model, 3, _benchmark_result(5))
     unchanged = torch.load(manager.best_path, weights_only=True)
     assert unchanged["metadata"]["train_round"] == 2
+
+
+def test_linear_schedule_interpolates_by_completed_rounds() -> None:
+    schedule = LinearSchedule(start=0.02, end=0.002)
+
+    assert schedule.value_at(0, 100) == pytest.approx(0.02)
+    assert schedule.value_at(50, 100) == pytest.approx(0.011)
+    assert schedule.value_at(100, 100) == pytest.approx(0.002)
+
+
+def test_training_metrics_record_includes_batch_fields() -> None:
+    result = TrainingBatchResult(
+        first_seed=10,
+        last_seed=13,
+        first_dealer=0,
+        last_dealer=3,
+        round_count=4,
+        steps=280,
+        learner_steps=130,
+        mean_reward=0.25,
+        mean_score_diff=250.0,
+        last_team_scores=(200, 0),
+        total_loss=0.4,
+        policy_loss=0.2,
+        value_loss=0.5,
+        entropy=1.1,
+        mean_return=0.25,
+        grad_norm=0.7,
+        updated=True,
+        entropy_bonus_weight=0.01,
+        advantage_normalization="batch",
+    )
+
+    record = _training_metrics_record(
+        16,
+        100,
+        2,
+        13,
+        [result],
+        {
+            "total_loss": result.total_loss,
+            "policy_loss": result.policy_loss,
+            "value_loss": result.value_loss,
+            "entropy": result.entropy,
+            "mean_return": result.mean_return,
+            "mean_reward": result.mean_reward,
+            "mean_score_diff": result.mean_score_diff,
+            "steps": 70.0,
+            "learner_steps": 32.5,
+            "round_count": 4.0,
+            "optimizer_updates": 1.0,
+            "grad_norm": 0.7,
+            "entropy_bonus_weight": 0.01,
+        },
+        elapsed_seconds=1.5,
+    )
+
+    assert record["event"] == "train"
+    assert record["optimizer_step"] == 2
+    assert record["total_optimizer_steps"] == 13
+    assert record["train_rounds"] == 4
+    assert record["train_batch_rounds"] == 4
+    assert record["train_advantage_normalization"] == "batch"
 
 
 def test_evaluate_model_uses_current_in_memory_policy_and_restores_mode() -> None:

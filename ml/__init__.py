@@ -70,15 +70,18 @@ _EXPORT_MODULES = {
     "rotate_player_values": ".policy_view",
     "ActorCriticLoss": ".training",
     "ActorCriticTrainingConfig": ".training",
+    "AdvantageNormalization": ".training",
     "BaselineAgent": ".training",
     "LearnerTransition": ".training",
+    "TrainingBatch": ".training",
+    "TrainingBatchResult": ".training",
     "TrainingRollout": ".training",
-    "TrainingRoundResult": ".training",
+    "collect_training_batch": ".training",
     "collect_training_round": ".training",
     "compute_actor_critic_loss": ".training",
     "learner_players_for_team": ".training",
-    "mean_training_result": ".training",
-    "train_actor_critic_round": ".training",
+    "summarize_training_batches": ".training",
+    "train_actor_critic_batch": ".training",
 }
 
 __all__ = tuple(_EXPORT_MODULES)
