@@ -99,8 +99,8 @@ Main files:
 - `ml/distributions.py`: categorical distribution over ragged legal-action
   groups.
 - `ml/policy.py`: inference wrapper that returns a legal action index.
-- `ml/training.py`: rollout collection and actor-critic updates against fixed
-  baseline agents.
+- `ml/training.py`: batched rollout collection and actor-critic updates against
+  fixed baseline agents.
 - `ml/checkpoint.py`: checkpoint save/load with schema compatibility checks.
 - `scripts/eval_stats.py`: confidence intervals for score difference and win
   rate.
@@ -336,33 +336,38 @@ P0/P2 = shared learner policy
 P1/P3 = fixed random, greedy, or heuristic baseline
 ```
 
-`ml/training.py` contains the reusable training code. `scripts/train_actor_critic.py`
-is the CLI wrapper.
+`ml/training.py` contains the reusable batch-training code.
+`scripts/train_actor_critic.py` is the CLI wrapper.
 
 ```mermaid
 sequenceDiagram
-    participant Trainer as train_actor_critic_round
+    participant CLI as train_actor_critic.py
+    participant Trainer as train_actor_critic_batch
     participant Env as TichuEnv
     participant Model as shared ParametricActorCritic
     participant Baseline as fixed baseline agents
     participant Optim as optimizer
 
-    Trainer->>Env: reset round
-    loop until terminal
-        Env-->>Trainer: current TichuEnvState
-        alt learner seat
-            Trainer->>Model: forward(batch_env_states(state))
-            Model-->>Trainer: logits + value
-            Trainer->>Trainer: sample legal action, store log_prob/value/entropy
-            Trainer->>Env: step(action_index, legal_actions=state.legal_actions)
-        else baseline seat
-            Trainer->>Baseline: choose_action(observation, legal_actions)
-            Trainer->>Env: step_action(action, legal_actions=state.legal_actions)
+    CLI->>Trainer: seeds + dealers for one batch
+    loop each complete round in batch
+        Trainer->>Env: create round
+        loop until terminal
+            Env-->>Trainer: current TichuEnvState
+            alt learner seat
+                Trainer->>Model: forward(batch_env_states(state))
+                Model-->>Trainer: logits + value
+                Trainer->>Trainer: sample legal action and store log_prob/value/entropy
+                Trainer->>Env: step(action_index, legal_actions=state.legal_actions)
+            else baseline seat
+                Trainer->>Baseline: choose_action(observation, legal_actions)
+                Trainer->>Env: step_action(action, legal_actions=state.legal_actions)
+            end
         end
+        Env-->>Trainer: terminal rewards
     end
-    Env-->>Trainer: terminal rewards
-    Trainer->>Trainer: compute returns and advantages
-    Trainer->>Optim: backward + step
+    Trainer->>Trainer: flatten learner transitions
+    Trainer->>Trainer: compute returns + normalized advantages
+    Trainer->>Optim: backward once + optimizer.step()
 ```
 
 Typical losses:
@@ -378,12 +383,26 @@ The critic learns to predict future reward. The actor learns to increase the
 probability of actions with positive advantage and decrease actions with
 negative advantage.
 
+Training batches accumulate complete rounds before one optimizer update:
+
+```text
+--batch-rounds 8 means 8 full Tichu rounds -> one actor-critic update
+```
+
+The default advantage normalization is `batch`: all learner transitions collected
+in the current batch are normalized together. `rollout` normalizes each round
+separately, and `none` uses raw `return - value` advantages. The entropy bonus can
+stay constant or decay linearly from `--entropy-bonus-weight` to
+`--entropy-bonus-final-weight`.
+
 Run a first baseline training job with:
 
 ```bash
 python -m scripts.train_actor_critic \
   --opponent heuristic \
   --rounds 1000 \
+  --batch-rounds 8 \
+  --learning-rate 1e-4 \
   --checkpoint checkpoints/actor_critic.pt
 ```
 
@@ -393,6 +412,11 @@ Run the same training with periodic held-out evaluation and metrics:
 python -m scripts.train_actor_critic \
   --opponent greedy \
   --rounds 1000 \
+  --batch-rounds 8 \
+  --learning-rate 1e-4 \
+  --advantage-normalization batch \
+  --entropy-bonus-weight 0.02 \
+  --entropy-bonus-final-weight 0.002 \
   --checkpoint checkpoints/actor_critic.latest.pt \
   --best-checkpoint checkpoints/actor_critic.best.pt \
   --eval-every 100 \
