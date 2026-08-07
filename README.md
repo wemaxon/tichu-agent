@@ -210,27 +210,7 @@ Deterministic rule-based baseline with hand-strength Tichu calls, partner-aware 
 ### Actor-Critic
 The model scores every currently legal action while also estimating the value of the current state.
 
-```mermaid
-flowchart LR
-    OBSERVATION["Observation features"] --> STATE_ENCODER["State encoder"]
-    ACTIONS["Features for each<br/>legal action"] --> ACTION_ENCODER["Action encoder"]
-    STATE_ENCODER --> SCORER["Candidate scorer"]
-    ACTION_ENCODER --> SCORER
-    SCORER --> LOGITS["One logit per<br/>legal action"]
-    LOGITS --> POLICY["Ragged categorical policy"]
-    POLICY --> CHOICE["Sample during training<br/>argmax while playing"]
-
-    STATE_ENCODER --> VALUE["State value"]
-    POLICY -->|"log probability and entropy"| LOSS["Actor-critic loss"]
-    VALUE --> LOSS
-    REWARD["Terminal team reward"] --> LOSS
-    LOSS --> UPDATE["Backpropagation<br/>and Adam update"]
-
-    style STATE_ENCODER fill:#f4ecff,stroke:#7755a6,stroke-width:2px
-    style ACTION_ENCODER fill:#f4ecff,stroke:#7755a6,stroke-width:2px
-    style SCORER fill:#f4ecff,stroke:#7755a6,stroke-width:2px
-    style VALUE fill:#f4ecff,stroke:#7755a6,stroke-width:2px
-```
+![actor-critic](docs/actor_critic.drawio.svg)
 
 
 
